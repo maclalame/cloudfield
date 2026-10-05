@@ -10,7 +10,7 @@ from scipy.stats import linregress
 
 
 colors_list = ['blue', 'orange', 'red', 'green', 'darkmagenta', 'magenta', 'darkred']
-plt.rcParams['font.size'] = 20
+plt.rcParams['font.size'] = 11
 
 def corr_simple_cases(save=False):
 
@@ -306,7 +306,9 @@ def MF_resolution(save=False):
     size = 5000
     total_area = size**2 * scale**2
 
-    p_list = np.linspace(0,1,50)
+    s_min, s_max = scale, 10000*scale
+    s_list = np.linspace(s_min, s_max, 200)
+    p_list = 1 - scale / s_list
     
     fig, ax = plt.subplots(1, 3, figsize=(15,3))
 
@@ -327,7 +329,7 @@ def MF_resolution(save=False):
 
             imM0, imM1, imM2 = cf.minkowski()
             # s = size*scale/np.sum(mask)
-            s = scale / p
+            s = scale / (1-p)
             subscale.append(s)
             m0.append(cf.cloud_cover)
             # imM0 does not seem to work properly : even when scaled by cf.n_tot,
@@ -383,18 +385,26 @@ def MF_resolution(save=False):
 
     #### SHOW SUBSAMPLED IMAGES ####
 
-    subsampling = np.logspace(0, np.log10(500), 4).astype(np.int32)
     fig, ax = plt.subplots(3, 4, figsize=(13,9))
 
+    p_list = np.linspace(p_min, p_max, 4)
+
     for i, cf_name in enumerate(cf_names):
-        for j, step in enumerate(subsampling):
+
+        for j, p in enumerate(p_list):
+
+            seed = np.random.random(size)
+            mask = seed >= p
 
             img = image.image_to_binary_array(cf_name, thresh)
-            img = img[:size:step,:size:step] # crop to square and subsample
+            img = img[:size,:size] # crop to square
+            img = img[mask][:,mask] # subsample
+            cf = CloudField(img)
 
+            s = scale / (1-p)
             ax[i,j].imshow(img, cmap='binary_r')
             ax[i,j].set_axis_off()
-            ax[i,j].set_title(f'{step*scale:.2f} km/px - {img.shape}')
+            ax[i,j].set_title(f'{s:.2f} km/px - {img.shape}')
 
     if save:
         plt.savefig('output_figures/MF_resolution_subsampled_img.pdf', 
