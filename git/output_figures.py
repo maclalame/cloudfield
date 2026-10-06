@@ -305,10 +305,10 @@ def MF_resolution_longrange(save=False, fit=True):
     size = 5000
     total_area = size**2 * scale**2
 
-    N_points = 50
+    N_points = 100
 
     s_min, s_max = scale, 10 #km/px
-    min_fit = 3 #km/px
+    min_fit = 4 #km/px
     s_list = np.linspace(s_min, s_max, N_points)
 
     ### SHOW MINKOWSKI FUNCTIONALS ###
@@ -397,11 +397,11 @@ def MF_resolution_longrange(save=False, fit=True):
             #### SHOW RESIDUE ####
 
             # M1
-            err1 = m1 / a1*resol**b1
+            err1 = m1 / (a1*resol**b1)
             ax_err[0].semilogy(resol, np.abs(err1), color=colors_list[i])
 
             # M2
-            err2 = m2 / a2*resol**b2
+            err2 = m2 / (a2*resol**b2)
             ax_err[1].semilogy(resol, np.abs(err2), color=colors_list[i])
 
     ax[0].set_xlabel(r'Resolution $s$ [km/px]')
