@@ -292,45 +292,64 @@ def corr_threshold(save=False):
         plt.savefig('output_figures/corr_threshold_subsampled_img.pdf', 
                 bbox_inches='tight')
         
-def MF_resolution(save=False):
+def MF_resolution_longrange(save=False, fit=True):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
 
     # Image to analyse
-    cf_names = ['Nuages/nuagesOI_L_60m.jpg',
-                'Nuages/trous_OI_60m.png',
-                'Nuages/petitsnuages_OI_60m.png']
-    
-    scale = 60e-3 #km/px
+    cf_names = ['Nuages/snapshot-2020-07-10.jpeg',
+                'Nuages/snapshot-2020-07-12.jpeg']
+
+    scale = 30e-3 #km/px
     thresh = 150
     size = 5000
     total_area = size**2 * scale**2
 
-    s_min, s_max = scale, 10000*scale
-    s_list = np.linspace(s_min, s_max, 200)
-    p_list = 1 - scale / s_list
+    N_points = 50
+
+    s_min, s_max = scale, 10 #km/px
+    min_fit = 3 #km/px
+    s_list = np.linspace(s_min, s_max, N_points)
+
+    ### SHOW MINKOWSKI FUNCTIONALS ###
     
     fig, ax = plt.subplots(1, 3, figsize=(15,3))
 
+    if fit:
+        fig_err, ax_ = plt.subplots(2, 2, figsize=(10,7))
+        ax_log = ax_[1,:]
+        ax_log[0].grid()
+        ax_log[1].grid()
+
+        ax_err = ax_[0,:]
+        ax_err[0].set_title(r'$m_1$ error [km/km²]')
+        ax_err[0].grid()
+        ax_err[0].set_xlabel(r'Resolution $s$ [km/px]')
+        ax_err[1].set_title(r'$m_2$ error [km$^{-2}$]')
+        ax_err[1].grid()
+        ax_err[1].set_xlabel(r'Resolution $s$ [km/px]')
 
     for i, cf_name in enumerate(cf_names):
 
-        subscale, m0, m1, m2 = [], [], [], []
+        resol, m0, m1, m2 = [], [], [], []
 
-        for p in p_list:
+        for s in s_list:
 
             seed = np.random.random(size)
+            p = 1 - scale / s
             mask = seed >= p
+            
 
             img = image.image_to_binary_array(cf_name, thresh)
             img = img[:size,:size] # crop to square
             img = img[mask][:,mask] # subsample
+            if img.shape[0] <= 2:
+                # s_max is too big
+                raise ValueError(f'img is too small {img.shape}')
             cf = CloudField(img)
 
             imM0, imM1, imM2 = cf.minkowski()
-            # s = size*scale/np.sum(mask)
-            s = scale / (1-p)
-            subscale.append(s)
+            resol.append(s)
             m0.append(cf.cloud_cover)
             # imM0 does not seem to work properly : even when scaled by cf.n_tot,
             # its value shows a decreasing trend as the image gets subsampled.
@@ -338,33 +357,52 @@ def MF_resolution(save=False):
             m1.append(imM1 * s / total_area)
             m2.append(imM2 / total_area)
 
-        subscale = np.array(subscale)
+        resol = np.array(resol)
         m0 = np.array(m0) 
         m1 = np.array(m1)
         m2 = np.array(m2)
 
-        ax[0].plot(subscale, m0, color=colors_list[i], alpha=0.5)
-        ax[1].plot(subscale, m1, color=colors_list[i], alpha=0.5)
-        ax[2].plot(subscale, m2, color=colors_list[i], alpha=0.5)
+        ax[0].plot(resol, m0, color=colors_list[i], alpha=0.5)
+        ax[1].plot(resol, m1, color=colors_list[i], alpha=0.5)
+        ax[2].plot(resol, m2, color=colors_list[i], alpha=0.5)
 
-        #### FIT ####
+        if fit:
+            #### FIT POISSON ####
 
-        mask1 = subscale > 4
-        b1, log_a1, r1, p1, se1 = linregress(np.log(subscale[mask1]), 
-                                            np.log(m1[mask1]))
-        mask2 = subscale > 4
-        b2, log_a2, r2, p2, se2 = linregress(np.log(subscale[mask2]),
-                                            np.log(-m2[mask2]))
+            mask1 = resol > min_fit
+            b1, log_a1, r1, p1, se1 = linregress(np.log(resol[mask1]), 
+                                                np.log(m1[mask1]))
+            mask2 = resol > min_fit
+            m2_sign = np.sign(m2[mask2][0])
+            b2, log_a2, r2, p2, se2 = linregress(np.log(resol[mask2]),
+                                                np.log(m2_sign*m2[mask2]))
+            a1, a2 = np.exp(log_a1), np.exp(log_a2)
+            print(f'{colors_list[i]} : a1={a1:.2f} | b1={b1:.2f} | a2={a2:.2f} | b2={b2:.2f}')
 
-        a1, a2 = np.exp(log_a1), np.exp(log_a2)
+            ax[1].plot(resol[mask1], a1*resol[mask1]**b1, '--', 
+                    color=colors_list[i], label=f'a = {a1:.2f}\nb = {b1:.2f}')
+            ax[2].plot(resol[mask2], m2_sign*a2*resol[mask2]**b2, '--', 
+                    color=colors_list[i], label=f'a = {a2:.3f}\nb = {b2:.2f}')
+            ax[0].plot(resol, np.ones_like(resol) * m0[0], '--',
+                color=colors_list[i], label=r'$m_0$ at best resolution')
 
-        ax[1].plot(subscale[mask1], a1*subscale[mask1]**b1, '--', 
-                color=colors_list[i], label=f'a = {a1:.2f}\nb = {b1:.2f}')
-        ax[2].plot(subscale[mask2], -a2*subscale[mask2]**b2, '--', 
-                color=colors_list[i], label=f'a = {a2:.2f}\nb = {b2:.2f}')
-        ax[0].plot(subscale, np.ones_like(subscale) * m0[0], '--',
-            color=colors_list[i], label=r'$m_0$ at best resolution')
 
+            #### SHOW LOG-LOG ####
+
+            ax_log[0].loglog(resol, np.abs(m1), color=colors_list[i])
+            ax_log[0].loglog(resol, a1*resol**b1, '--', color=colors_list[i])
+            ax_log[1].loglog(resol, np.abs(m2), color=colors_list[i])
+            ax_log[1].loglog(resol, a2*resol**b2, '--', color=colors_list[i])
+
+            #### SHOW RESIDUE ####
+
+            # M1
+            err1 = m1 / a1*resol**b1
+            ax_err[0].semilogy(resol, np.abs(err1), color=colors_list[i])
+
+            # M2
+            err2 = m2 / a2*resol**b2
+            ax_err[1].semilogy(resol, np.abs(err2), color=colors_list[i])
 
     ax[0].set_xlabel(r'Resolution $s$ [km/px]')
     ax[0].set_title(r'Cloud cover $m_0$')
@@ -379,21 +417,22 @@ def MF_resolution(save=False):
     ax[2].grid()
 
     if save:
-        plt.savefig('output_figures/MF_resolution_analysis.pdf', 
+        plt.savefig('output_figures/MF_resolution_analysis_longrange.pdf', 
                     bbox_inches='tight')
     
 
     #### SHOW SUBSAMPLED IMAGES ####
 
-    fig, ax = plt.subplots(3, 4, figsize=(13,9))
+    fig, ax = plt.subplots(len(cf_names), 4, figsize=(13,3*len(cf_names)))
 
-    p_list = np.linspace(p_min, p_max, 4)
+    s_list = np.linspace(s_min, s_max, 4)
 
     for i, cf_name in enumerate(cf_names):
 
-        for j, p in enumerate(p_list):
+        for j, s in enumerate(s_list):
 
             seed = np.random.random(size)
+            p = 1 - scale / s
             mask = seed >= p
 
             img = image.image_to_binary_array(cf_name, thresh)
@@ -401,10 +440,9 @@ def MF_resolution(save=False):
             img = img[mask][:,mask] # subsample
             cf = CloudField(img)
 
-            s = scale / (1-p)
             ax[i,j].imshow(img, cmap='binary_r')
             ax[i,j].set_axis_off()
-            ax[i,j].set_title(f'{s:.2f} km/px - {img.shape}')
+            ax[i,j].set_title(f'{s:.2f} km/px - {img.shape}', color=colors_list[i])
 
     if save:
         plt.savefig('output_figures/MF_resolution_subsampled_img.pdf', 
