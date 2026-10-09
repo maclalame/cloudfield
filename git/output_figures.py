@@ -306,9 +306,10 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
     size = 5000
     total_area = size**2 * scale**2
 
-    N_points = 100
+    N_points = 20
+    N_stat = 50
 
-    s_list = np.linspace(s_min, s_max, N_points)
+    resol = np.linspace(s_min, s_max, N_points)
 
     ### SHOW MINKOWSKI FUNCTIONALS ###
     
@@ -325,50 +326,73 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
 
     for i, cf_name in enumerate(cf_names):
 
-        resol, m0, m1, m2 = [], [], [], []
+        M0, M1, M2 = [], [], []
 
-        for s in s_list:
+        for _ in range(N_stat):
 
-            seed = np.random.random(size)
-            p = 1 - scale / s
-            mask = seed >= p
-            
-            img = image.image_to_binary_array(cf_name, thresh)
-            img = img[:size,:size] # crop to square
-            img = img[mask][:,mask] # subsample
-            if img.shape[0] <= 2:
-                # s_max is too big
-                raise ValueError(f'img is too small {img.shape}')
-            cf = CloudField(img)
+            m0, m1, m2 = [], [], []
 
-            imM0, imM1, imM2 = cf.minkowski()
-            resol.append(s)
-            m0.append(cf.cloud_cover)
-            # imM0 does not seem to work properly : even when scaled by cf.n_tot,
-            # its value shows a decreasing trend as the image gets subsampled.
-            # One wonders whether M1 and M2 work properly...
-            m1.append(imM1 * s / total_area)
-            m2.append(imM2 / total_area)
+            for s in resol:
 
-        resol = np.array(resol)
-        m0 = np.array(m0) 
-        m1 = np.array(m1)
-        m2 = np.array(m2)
+                seed = np.random.random(size)
+                p = 1 - scale / s
+                mask = seed >= p
+                
+                img = image.image_to_binary_array(cf_name, thresh)
+                img = img[:size,:size] # crop to square
+                img = img[mask][:,mask] # subsample
+                if img.shape[0] <= 2:
+                    # s_max is too big
+                    raise ValueError(f'img is too small {img.shape}')
+                cf = CloudField(img)
 
-        ax[0].plot(resol, m0, color=colors_list[i], alpha=0.5)
-        ax[1].plot(resol, m1, color=colors_list[i], alpha=0.5)
-        ax[2].plot(resol, m2, color=colors_list[i], alpha=0.5)
+                imM0, imM1, imM2 = cf.minkowski()
+                m0.append(cf.cloud_cover)
+                # imM0 does not seem to work properly : even when scaled by cf.n_tot,
+                # its value shows a decreasing trend as the image gets subsampled.
+                # One wonders whether M1 and M2 work properly...
+                m1.append(imM1 * s / total_area)
+                m2.append(imM2 / total_area)
+
+            M0.append(m0) 
+            M1.append(m1)
+            M2.append(m2)
+
+        M0 = np.array(M0)
+        M1 = np.array(M1)
+        M2 = np.array(M2)
+
+        m0_mean = np.mean(M0, axis=0)
+        m1_mean = np.mean(M1, axis=0)
+        m2_mean = np.mean(M2, axis=0)
+
+        m0_std = np.std(M0, axis=0, ddof=1)
+        m1_std = np.std(M1, axis=0, ddof=1)
+        m2_std = np.std(M2, axis=0, ddof=1)
+
+        ax[0].plot(resol, m0_mean, color=colors_list[i], alpha=0.5)
+        ax[1].plot(resol, m1_mean, color=colors_list[i], alpha=0.5)
+        ax[2].plot(resol, m2_mean, color=colors_list[i], alpha=0.5)
+        ax[0].fill_between(resol, m0_mean+m0_std/np.sqrt(N_stat),
+                           m0_mean-m0_std/np.sqrt(N_stat), 
+                           color=colors_list[i], alpha=0.2)
+        ax[1].fill_between(resol, m1_mean+m1_std/np.sqrt(N_stat),
+                           m1_mean-m1_std/np.sqrt(N_stat), 
+                           color=colors_list[i], alpha=0.2)
+        ax[2].fill_between(resol, m2_mean+m2_std/np.sqrt(N_stat),
+                           m2_mean-m2_std/np.sqrt(N_stat), 
+                           color=colors_list[i], alpha=0.2)
 
         if fit:
             #### FIT POISSON ####
 
-            mask1 = np.logical_and(fit_min<resol, fit_max>resol)
+            mask1 = np.logical_and(fit_min<=resol, fit_max>=resol)
             b1, log_a1, r1, p1, se1 = linregress(np.log(resol[mask1]), 
-                                                np.log(m1[mask1]))
+                                                 np.log(m1_mean[mask1]))
             mask2 = mask1
-            m2_sign = np.sign(m2[mask2][0])
+            m2_sign = np.sign(m2_mean[mask2][0])
             b2, log_a2, r2, p2, se2 = linregress(np.log(resol[mask2]),
-                                                np.log(m2_sign*m2[mask2]))
+                                                 np.log(m2_sign*m2_mean[mask2]))
             a1, a2 = np.exp(log_a1), np.exp(log_a2)
             print(f'{colors_list[i]} : a1={a1:.2f} | b1={b1:.2f} | a2={a2:.2f} | b2={b2:.2f}')
 
@@ -376,19 +400,25 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
                     color=colors_list[i], label=f'a = {a1:.2f}\nb = {b1:.2f}')
             ax[2].plot(resol[mask2], m2_sign*a2*resol[mask2]**b2, '--', 
                     color=colors_list[i], label=f'a = {a2:.3f}\nb = {b2:.2f}')
-            ax[0].plot(resol, np.ones_like(resol) * m0[0], '--',
+            ax[0].plot(resol, np.ones_like(resol) * m0_mean[0], '--',
                 color=colors_list[i], label=r'$m_0$ at best resolution')
 
 
             #### SHOW RESIDUE ####
 
             # M1
-            err1 = m1 / (a1*resol**b1)
+            err1 = m1_mean / (a1*resol**b1)
             ax_err[0].semilogy(resol, np.abs(err1), color=colors_list[i])
+            ax_err[0].fill_between(resol, np.abs(err1)+m1_std/np.sqrt(N_stat)/(a1*resol**b1),
+                                   np.abs(err1)-m1_std/np.sqrt(N_stat)/(a1*resol**b1),
+                                   color=colors_list[i], alpha=0.2)
 
             # M2
-            err2 = m2 / (a2*resol**b2)
+            err2 = m2_mean / (a2*resol**b2)
             ax_err[1].semilogy(resol, np.abs(err2), color=colors_list[i])
+            ax_err[1].fill_between(resol, np.abs(err2)+m2_std/np.sqrt(N_stat)/(a2*resol**b2),
+                                   np.abs(err2)-m2_std/np.sqrt(N_stat)/(a2*resol**b2),
+                                   color=colors_list[i], alpha=0.2)
 
     ax[0].set_xlabel(r'Resolution $s$ [km/px]')
     ax[0].set_title(r'Cloud cover $m_0$')
