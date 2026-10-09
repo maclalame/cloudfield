@@ -293,7 +293,7 @@ def corr_threshold(save=False):
                 bbox_inches='tight')
         
 def MF_resolution(s_min, s_max, fit_min=None, fit_max=None, 
-                            save=False, fit=True):
+                            save=False, fit=None, N_points=20, N_stat=50):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
 
@@ -306,16 +306,13 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
     size = 5000
     total_area = size**2 * scale**2
 
-    N_points = 20
-    N_stat = 50
-
     resol = np.linspace(s_min, s_max, N_points)
 
     ### SHOW MINKOWSKI FUNCTIONALS ###
     
     fig, ax = plt.subplots(1, 3, figsize=(15,3))
 
-    if fit:
+    if fit is not None:
         fig_err, ax_err = plt.subplots(1, 2, figsize=(10,3))
         ax_err[0].set_title(r'$m_1$ error [km/km²]')
         ax_err[0].grid()
@@ -383,7 +380,19 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
                            m2_mean-m2_std/np.sqrt(N_stat), 
                            color=colors_list[i], alpha=0.2)
 
-        if fit:
+        ax[0].set_xlabel(r'Resolution $s$ [km/px]')
+        ax[0].set_title(r'Cloud cover $m_0$')
+        ax[0].grid()
+
+        ax[1].set_xlabel(r'Resolution $s$ [km/px]')
+        ax[1].set_title(r'Interface density $m_1$ [km/km²]')
+        ax[1].grid()
+
+        ax[2].set_xlabel(r'Resolution $s$ [km/px]')
+        ax[2].set_title(r'Euler characteristic $m_2$ [km$^{-2}$]')
+        ax[2].grid()
+
+        if fit == 'powerlaw':
             #### FIT POISSON ####
 
             mask1 = np.logical_and(fit_min<=resol, fit_max>=resol)
@@ -420,17 +429,51 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
                                    np.abs(err2)-m2_std/np.sqrt(N_stat)/(a2*resol**b2),
                                    color=colors_list[i], alpha=0.2)
 
-    ax[0].set_xlabel(r'Resolution $s$ [km/px]')
-    ax[0].set_title(r'Cloud cover $m_0$')
-    ax[0].grid()
+        elif fit=='exponential':
 
-    ax[1].set_xlabel(r'Resolution $s$ [km/px]')
-    ax[1].set_title(r'Interface density $m_1$ [km/km²]')
-    ax[1].grid()
+            mask = np.logical_and(fit_min<=resol, fit_max>=resol)
 
-    ax[2].set_xlabel(r'Resolution $s$ [km/px]')
-    ax[2].set_title(r'Euler characteristic $m_2$ [km$^{-2}$]')
-    ax[2].grid()
+            def f(s, a, b, c):
+                return a * np.exp(-s/b) + c
+
+            p1 = [m1_mean[mask][0] - m1_mean[mask][-1],
+                  resol[mask][-1] - resol[mask][0],
+                  m1_mean[mask][-1]]
+            popt1, pcov1 = curve_fit(f, resol[mask], m1_mean[mask], p0=p1,
+                                     bounds=([-10, 0, -10], [10, 100, 10]))
+            a1, b1, c1 = popt1
+            ax[1].plot(resol[mask], f(resol[mask], *popt1), '--', color=colors_list[i])
+            
+            p2 = [m2_mean[mask][0] - m2_mean[mask][-1],
+                  resol[mask][-1] - resol[mask][0],
+                  m2_mean[mask][-1]]
+            popt2, pcov2 = curve_fit(f, resol[mask], m2_mean[mask], p0=p2,
+                                     bounds=([-10, 0, -10], [10, 100, 10]))
+            a2, b2, c2 = popt2
+            ax[2].plot(resol[mask], f(resol[mask], *popt2), '--', color=colors_list[i])
+            
+            ax[0].plot(resol, np.ones_like(resol) * m0_mean[0], '--',
+                       color=colors_list[i], label=r'$m_0$ at best resolution')
+
+            print(f'{colors_list[i]} : a1={a1:.2f} | b1={b1:.2f} | c1={c1:.2f} '
+                  + f'| a2={a2:.2f} | b2={b2:.2f} | c2={c2:.2f}')
+
+            #### SHOW RESIDUE ####
+
+            # M1
+            err1 = m1_mean / f(resol, *popt1)
+            ax_err[0].semilogy(resol, np.abs(err1), color=colors_list[i])
+            ax_err[0].fill_between(resol, np.abs(err1)+m1_std/np.sqrt(N_stat)/f(resol, *popt1),
+                                   np.abs(err1)-m1_std/np.sqrt(N_stat)/f(resol, *popt1),
+                                   color=colors_list[i], alpha=0.2)
+
+            # M2
+            err2 = m2_mean / f(resol, *popt2)
+            ax_err[1].semilogy(resol, np.abs(err2), color=colors_list[i])
+            ax_err[1].fill_between(resol, np.abs(err2)+m2_std/np.sqrt(N_stat)/f(resol, *popt2),
+                                   np.abs(err2)-m2_std/np.sqrt(N_stat)/f(resol, *popt2),
+                                   color=colors_list[i], alpha=0.2)
+
 
     if save:
         plt.savefig('output_figures/MF_resolution_analysis_longrange.pdf', 
