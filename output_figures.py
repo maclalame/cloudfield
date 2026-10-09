@@ -291,17 +291,23 @@ def corr_threshold(save=False):
     if save:
         plt.savefig('output_figures/corr_threshold_subsampled_img.pdf', 
                 bbox_inches='tight')
-        
-def MF_resolution(s_min, s_max, fit_min=None, fit_max=None, 
-                            save=False, fit=None, N_points=20, N_stat=50):
+
+
+# FIGURES RESOLUTION SENSITIVITY ANALYSIS
+
+# fonction générique
+def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None, 
+                            save=False, fit=None, N_points=20, N_stat=50,
+                            root_name=''):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
 
     # Image to analyse
-    cf_names = ['Nuages/snapshot-2020-07-10.jpeg',
-                'Nuages/snapshot-2020-07-12.jpeg']
+    cf_names = ['Nuages/nuagesOI_L_60m.jpg',
+                'Nuages/petitsnuages_OI_60m.png',
+                'Nuages/trous_OI_60m.png']
 
-    scale = 30e-3 #km/px
+    scale = 60e-3 #km/px
     thresh = 150
     size = 5000
     total_area = size**2 * scale**2
@@ -380,18 +386,6 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
                            m2_mean-m2_std/np.sqrt(N_stat), 
                            color=colors_list[i], alpha=0.2)
 
-        ax[0].set_xlabel(r'Resolution $s$ [km/px]')
-        ax[0].set_title(r'Cloud cover $m_0$')
-        ax[0].grid()
-
-        ax[1].set_xlabel(r'Resolution $s$ [km/px]')
-        ax[1].set_title(r'Interface density $m_1$ [km/km²]')
-        ax[1].grid()
-
-        ax[2].set_xlabel(r'Resolution $s$ [km/px]')
-        ax[2].set_title(r'Euler characteristic $m_2$ [km$^{-2}$]')
-        ax[2].grid()
-
         if fit == 'powerlaw':
             #### FIT POISSON ####
 
@@ -428,6 +422,10 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
             ax_err[1].fill_between(resol, np.abs(err2)+m2_std/np.sqrt(N_stat)/(a2*resol**b2),
                                    np.abs(err2)-m2_std/np.sqrt(N_stat)/(a2*resol**b2),
                                    color=colors_list[i], alpha=0.2)
+
+            if save:
+                plt.savefig('output_figures/MF_resolution_analysis_err_'+root_name+'.pdf', 
+                    bbox_inches='tight')
 
         elif fit=='exponential':
 
@@ -474,10 +472,26 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
                                    np.abs(err2)-m2_std/np.sqrt(N_stat)/f(resol, *popt2),
                                    color=colors_list[i], alpha=0.2)
 
+            if save:
+                plt.savefig('output_figures/MF_resolution_analysis_err_'+root_name+'.pdf', 
+                            bbox_inches='tight')
+
+    ax[0].set_xlabel(r'Resolution $s$ [km/px]')
+    ax[0].set_title(r'Cloud cover $m_0$')
+    ax[0].grid()
+
+    ax[1].set_xlabel(r'Resolution $s$ [km/px]')
+    ax[1].set_title(r'Interface density $m_1$ [km/km²]')
+    ax[1].grid()
+
+    ax[2].set_xlabel(r'Resolution $s$ [km/px]')
+    ax[2].set_title(r'Euler characteristic $m_2$ [km$^{-2}$]')
+    ax[2].grid()
 
     if save:
-        plt.savefig('output_figures/MF_resolution_analysis_longrange.pdf', 
+        plt.savefig('output_figures/MF_resolution_analysis_'+root_name+'.pdf', 
                     bbox_inches='tight')
+
     
 
     #### SHOW SUBSAMPLED IMAGES ####
@@ -504,10 +518,23 @@ def MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
             ax[i,j].set_title(f'{s:.2f} km/px - {img.shape}', color=colors_list[i])
 
     if save:
-        plt.savefig('output_figures/MF_resolution_subsampled_img.pdf', 
+        plt.savefig('output_figures/MF_resolution_subsampled_img_'+root_name+'.pdf', 
                 bbox_inches='tight')
 
-        
+# fonction qui produit la figure résolution grossière
+def MF_coarse_resolution():
+    _MF_resolution(s_min=.06, s_max=10,
+                  fit_min=4, fit_max=10, fit='powerlaw',
+                  save=True, root_name='coarse',
+                  N_stat=10)
+
+# fonction qui produit la figure résolution fine
+def MF_fine_resolution():
+    _MF_resolution(s_min=.06, s_max=3,
+                  fit_min=.06, fit_max=.18, fit='exponential',
+                  save=True, root_name='fine',
+                  N_stat=10, N_points=30)
+
 def MF_resolution_poisson(save=False):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
