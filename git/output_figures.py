@@ -292,7 +292,8 @@ def corr_threshold(save=False):
         plt.savefig('output_figures/corr_threshold_subsampled_img.pdf', 
                 bbox_inches='tight')
         
-def MF_resolution_longrange(save=False, fit=True):
+def MF_resolution(s_min, s_max, fit_min=None, fit_max=None, 
+                            save=False, fit=True):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
 
@@ -307,8 +308,6 @@ def MF_resolution_longrange(save=False, fit=True):
 
     N_points = 100
 
-    s_min, s_max = scale, 10 #km/px
-    min_fit = 4 #km/px
     s_list = np.linspace(s_min, s_max, N_points)
 
     ### SHOW MINKOWSKI FUNCTIONALS ###
@@ -316,12 +315,7 @@ def MF_resolution_longrange(save=False, fit=True):
     fig, ax = plt.subplots(1, 3, figsize=(15,3))
 
     if fit:
-        fig_err, ax_ = plt.subplots(2, 2, figsize=(10,7))
-        ax_log = ax_[1,:]
-        ax_log[0].grid()
-        ax_log[1].grid()
-
-        ax_err = ax_[0,:]
+        fig_err, ax_err = plt.subplots(1, 2, figsize=(10,3))
         ax_err[0].set_title(r'$m_1$ error [km/km²]')
         ax_err[0].grid()
         ax_err[0].set_xlabel(r'Resolution $s$ [km/px]')
@@ -339,7 +333,6 @@ def MF_resolution_longrange(save=False, fit=True):
             p = 1 - scale / s
             mask = seed >= p
             
-
             img = image.image_to_binary_array(cf_name, thresh)
             img = img[:size,:size] # crop to square
             img = img[mask][:,mask] # subsample
@@ -369,10 +362,10 @@ def MF_resolution_longrange(save=False, fit=True):
         if fit:
             #### FIT POISSON ####
 
-            mask1 = resol > min_fit
+            mask1 = np.logical_and(fit_min<resol, fit_max>resol)
             b1, log_a1, r1, p1, se1 = linregress(np.log(resol[mask1]), 
                                                 np.log(m1[mask1]))
-            mask2 = resol > min_fit
+            mask2 = mask1
             m2_sign = np.sign(m2[mask2][0])
             b2, log_a2, r2, p2, se2 = linregress(np.log(resol[mask2]),
                                                 np.log(m2_sign*m2[mask2]))
@@ -386,13 +379,6 @@ def MF_resolution_longrange(save=False, fit=True):
             ax[0].plot(resol, np.ones_like(resol) * m0[0], '--',
                 color=colors_list[i], label=r'$m_0$ at best resolution')
 
-
-            #### SHOW LOG-LOG ####
-
-            ax_log[0].loglog(resol, np.abs(m1), color=colors_list[i])
-            ax_log[0].loglog(resol, a1*resol**b1, '--', color=colors_list[i])
-            ax_log[1].loglog(resol, np.abs(m2), color=colors_list[i])
-            ax_log[1].loglog(resol, a2*resol**b2, '--', color=colors_list[i])
 
             #### SHOW RESIDUE ####
 
@@ -447,6 +433,7 @@ def MF_resolution_longrange(save=False, fit=True):
     if save:
         plt.savefig('output_figures/MF_resolution_subsampled_img.pdf', 
                 bbox_inches='tight')
+
         
 def MF_resolution_poisson(save=False):
 
