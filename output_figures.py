@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from matplotlib import colors, cm
+from matplotlib import colors, cm, ticker
 from cloudfield import CloudField
 import img as image
 from PIL import Image
@@ -9,8 +9,9 @@ from scipy.optimize import curve_fit
 from scipy.stats import linregress
 
 
+
 colors_list = ['blue', 'orange', 'red', 'green', 'darkmagenta', 'magenta', 'darkred']
-plt.rcParams['font.size'] = 11
+plt.rcParams['font.size'] = 16
 
 def corr_simple_cases(save=False):
 
@@ -112,6 +113,37 @@ def corr_simple_cases(save=False):
     if save:
         plt.savefig('output_figures/corr_simple_cases.pdf', 
                     bbox_inches='tight')
+
+def display_cloudfields(save=False):
+
+    #### DISPLAY CLOUD FIELDS ####
+
+    labels = ['A', 'B', 'C', 'D', 'E', 'F']
+
+    cf_names = ['Nuages/20260527_typical.jpeg',
+                'Nuages/20260527_convectionfermee.jpeg',
+                'Nuages/20260527_petitsnuages.jpeg',
+                'Nuages/20260527_moutonneux.jpeg',
+                'Nuages/20260527_typeL.jpeg',
+                'Nuages/20260527_anisotropic.jpeg']
+
+    fig, ax = plt.subplots(2, 3, figsize=(9,6),
+                           gridspec_kw={'wspace':0, 'hspace':0},
+                           sharey=True, sharex=True)
+    ax = ax.flatten()
+    size=5000
+
+    for i, cf_name in enumerate(cf_names):
+        
+        ax[i].imshow(Image.open(cf_name).resize((size,size)), cmap='gray')
+        ax[i].set_axis_off()
+        ax[i].text(100,4900, labels[i],
+            backgroundcolor='white', fontsize=20)
+        # ax[i].set_title(f'{cf_name.split("/")[-1]} - cl. cover = {cf.cloud_cover:.2f}')
+
+    if save:
+        plt.savefig('output_figures/display_cloudfields.pdf', 
+                bbox_inches='tight')
 
 def corr_resolution(save=False):
 
@@ -303,11 +335,13 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
     #### RESOLUTION SENSITIVITY ANALYSIS ####
 
     # Image to analyse
-    cf_names = ['Nuages/nuagesOI_L_60m.jpg',
-                'Nuages/petitsnuages_OI_60m.png',
-                'Nuages/trous_OI_60m.png']
+    cf_names = ['Nuages/20260527_petitsnuages.jpeg',
+                'Nuages/20260527_moutonneux.jpeg',
+                'Nuages/20260527_trous.jpeg',
+                'Nuages/20260527_anisotropic.jpeg',
+                'Nuages/20260527_structural.jpeg']
 
-    scale = 60e-3 #km/px
+    scale = 30e-3 #km/px
     thresh = 150
     size = 5000
     total_area = size**2 * scale**2
@@ -319,12 +353,15 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
     fig, ax = plt.subplots(1, 3, figsize=(15,3))
 
     if fit is not None:
-        fig_err, ax_err = plt.subplots(1, 2, figsize=(10,3))
-        ax_err[0].set_title(r'$m_1$ error [km/km²]')
-        ax_err[0].grid()
-        ax_err[0].set_xlabel(r'Resolution $s$ [km/px]')
-        ax_err[1].set_title(r'$m_2$ error [km$^{-2}$]')
-        ax_err[1].grid()
+        fig_err, ax_err = plt.subplots(2, 1, figsize=(5,8), 
+                                       sharex=True, sharey=True,
+                                       gridspec_kw={'hspace': 0})
+        ax_err[0].set_ylabel(r'$m_1$ error (log) [km/km²]')
+        ax_err[0].grid(which='both')
+        ax_err[0].set_yticks([0.9, 0.95, 1, 1.05, 1.1])
+        ax_err[1].set_yticks([0.9, 0.95, 1, 1.05, 1.1])
+        ax_err[1].set_ylabel(r'$m_2$ error (log) [km$^{-2}$]')
+        ax_err[1].grid(which='both')
         ax_err[1].set_xlabel(r'Resolution $s$ [km/px]')
 
     for i, cf_name in enumerate(cf_names):
@@ -397,7 +434,7 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
             b2, log_a2, r2, p2, se2 = linregress(np.log(resol[mask2]),
                                                  np.log(m2_sign*m2_mean[mask2]))
             a1, a2 = np.exp(log_a1), np.exp(log_a2)
-            print(f'{colors_list[i]} : a1={a1:.2f} | b1={b1:.2f} | a2={a2:.2f} | b2={b2:.2f}')
+            print(f'{colors_list[i]} : a1={a1:.3f} | b1={b1:.3f} | a2={a2:.3f} | b2={b2:.3f}')
 
             ax[1].plot(resol[mask1], a1*resol[mask1]**b1, '--', 
                     color=colors_list[i], label=f'a = {a1:.2f}\nb = {b1:.2f}')
@@ -453,8 +490,8 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
             ax[0].plot(resol, np.ones_like(resol) * m0_mean[0], '--',
                        color=colors_list[i], label=r'$m_0$ at best resolution')
 
-            print(f'{colors_list[i]} : a1={a1:.2f} | b1={b1:.2f} | c1={c1:.2f} '
-                  + f'| a2={a2:.2f} | b2={b2:.2f} | c2={c2:.2f}')
+            print(f'{colors_list[i]} : a1={a1:.3f} | b1={b1:.3f} | c1={c1:.3f} '
+                  + f'| a2={a2:.3f} | b2={b2:.3f} | c2={c2:.3f}')
 
             #### SHOW RESIDUE ####
 
@@ -523,17 +560,18 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
 
 # fonction qui produit la figure résolution grossière
 def MF_coarse_resolution():
-    _MF_resolution(s_min=.06, s_max=10,
+    _MF_resolution(s_min=.03, s_max=10,
                   fit_min=4, fit_max=10, fit='powerlaw',
                   save=True, root_name='coarse',
                   N_stat=10)
 
 # fonction qui produit la figure résolution fine
 def MF_fine_resolution():
-    _MF_resolution(s_min=.06, s_max=3,
-                  fit_min=.06, fit_max=.18, fit='exponential',
+    _MF_resolution(s_min=.03, s_max=.18,
+                  fit_min=.03, fit_max=.18, fit='exponential',
                   save=True, root_name='fine',
-                  N_stat=10, N_points=30)
+                  N_stat=10, N_points=10)
+
 
 def MF_resolution_poisson(save=False):
 
