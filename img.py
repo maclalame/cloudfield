@@ -1,5 +1,6 @@
 import numpy as np
 from PIL import Image
+import cv2
 
 def image_to_binary_array(image_path, threshold=128):
     """
@@ -85,3 +86,9 @@ def disk(size=8000, r=3000, save_path=None):
         img.save(save_path)
 
     return img_array
+
+def resample(img_array, factor=1):
+    h, w = img_array.shape[:2]
+    return cv2.resize(img_array,
+                      (round(w / factor), round(h / factor)),
+                      interpolation=cv2.INTER_LINEAR)
