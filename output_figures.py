@@ -145,6 +145,52 @@ def display_cloudfields(save=False):
         plt.savefig('output_figures/display_cloudfields.pdf', 
                 bbox_inches='tight')
 
+def corr_length(cf_name='Nuages/20260527_typical.jpeg', plot=False):
+
+    #### CORRELATION LENGTH ANALYSIS ####
+
+    # Image to analyse
+    scale = 30e-3 #km/px
+    thresh = 150
+    size = 5000
+    total_area = size**2 * scale**2
+
+    img = image.image_to_binary_array(cf_name, thresh)
+    r_max = size // 4
+    cf = CloudField(img, r_max=r_max)
+
+    C_xy, C_r, C_theta = cf.C(n_draws=1000)
+    r = np.arange(len(C_r)) * scale
+
+    def f(r, delta):
+        cste=(2*cf.cloud_cover-1)**2
+        B = cste / (1-cste)
+        return (np.exp(-r/delta) + B) / (1 + B)
+
+    max_fit = 1
+    mask = r < max_fit
+    p0 = [1.5]
+    popt, pcov = curve_fit(f, r[mask], C_r[mask], p0)
+    delta = popt
+
+    if plot:
+
+        fig, ax = plt.subplots(1, 2, figsize=(8,3))
+
+        ax[0].plot(r, C_r, color='black', label=r'C(r)')
+        ax[0].plot(r, f(r, *popt), '--', color='red')
+        ax[0].set_xlabel(r'Radius $r$ [km]')
+        ax[0].set_ylabel(r'Radial correlation $C(r)$')
+        ax[0].grid()
+
+        ax[1].plot(r[mask], C_r[mask], color='black', label=r'C(r)')
+        ax[1].plot(r[mask], f(r[mask], *popt), '--', color='red')
+        ax[1].set_xlabel(r'Radius $r$ [km]')
+        ax[1].grid()
+
+    return delta
+
+
 def corr_resolution(save=False):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
@@ -329,7 +375,7 @@ def corr_threshold(save=False):
 
 # fonction générique
 def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None, 
-                            save=False, fit=None, N_points=20, N_stat=50,
+                            save=False, fit=None, N_points=20,
                             root_name=''):
 
     #### RESOLUTION SENSITIVITY ANALYSIS ####
@@ -348,11 +394,11 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
     size = 5000
     total_area = size**2 * scale**2
 
-    resol = np.linspace(s_min, s_max, N_points)
+    resol = np.logspace(np.log10(s_min), np.log10(s_max), N_points)
 
     ### SHOW MINKOWSKI FUNCTIONALS ###
     
-    fig, ax = plt.subplots(2, 1, figsize=(5,8),
+    fig, ax = plt.subplots(3, 1, figsize=(5,12),
                            sharex=True,
                            gridspec_kw={'hspace': 0})
 
@@ -360,109 +406,87 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
         fig_err, ax_err = plt.subplots(2, 1, figsize=(5,8), 
                                        sharex=True, sharey=False,
                                        gridspec_kw={'hspace': 0})
-        ax_err[0].set_ylabel(r'$m_1$ residuals [km/km²]')
-        ax_err[0].grid()#(which='both')
-        # ax_err[0].set_yticks([0.9, 0.95, 1, 1.05, 1.1])
-        # ax_err[1].set_yticks([0.9, 0.95, 1, 1.05, 1.1])
-        ax_err[1].set_ylabel(r'$m_2$ residuals [km$^{-2}$]')
-        ax_err[1].grid()#which='both')
-        ax_err[1].set_xlabel(r'Resolution $s$ [km/px]')
+        
+        if fit=='exponential':
+            ax_err[0].set_ylabel(r'$m_1$ residuals [km/km²]')
+            ax_err[0].grid()#(which='both')
+            ax_err[1].set_ylabel(r'$m_2$ residuals [km$^{-2}$]')
+            ax_err[1].grid()#which='both')
+            ax_err[1].set_xlabel(r'Resolution $s$ [km/px]')
+            ax_err[1].set_xlabel(r'Resolution $s$ [km/px]')
+
+        elif fit=="powerlaw":
+            ax_err[0].set_ylabel(r'$m_1$ (log) [km/km²]')
+            ax_err[0].grid(which='both')
+            # ax_err[0].set_yticks([0.9, 0.95, 1, 1.05, 1.1])
+            # ax_err[1].set_yticks([0.9, 0.95, 1, 1.05, 1.1])
+            ax_err[1].set_ylabel(r'$|m_2|$ (log) [km$^{-2}$]')
+            ax_err[1].grid(which='both')
+            ax_err[1].set_xlabel(r'Resolution $s$ (log) [km/px]')
+
+        
 
     for i, cf_name in enumerate(cf_names):
 
-        M0, M1, M2 = [], [], []
+        m0, m1, m2 = [], [], []
 
-        for _ in range(N_stat):
+        for s in resol:
 
-            m0, m1, m2 = [], [], []
+            f = s / scale
+            img = image.image_to_binary_array(cf_name, thresh, 
+                                              factor=f, size=size)
+            cf = CloudField(img)
 
-            for s in resol:
+            imM0, imM1, imM2 = cf.minkowski()
+            m0.append(cf.cloud_cover)
+            # imM0 does not seem to work properly : even when scaled by cf.n_tot,
+            # its value shows a decreasing trend as the image gets subsampled.
+            # One wonders whether M1 and M2 work properly...
+            m1.append(imM1 * s / total_area)
+            m2.append(imM2 / total_area)
 
-                seed = np.random.random(size)
-                p = 1 - scale / s
-                mask = seed >= p
-                
-                img = image.image_to_binary_array(cf_name, thresh)
-                img = img[:size,:size] # crop to square
-                img = img[mask][:,mask] # subsample
-                if img.shape[0] <= 2:
-                    # s_max is too big
-                    raise ValueError(f'img is too small {img.shape}')
-                cf = CloudField(img)
+        m0 = np.array(m0)
+        m1 = np.array(m1)
+        m2 = np.array(m2)
 
-                imM0, imM1, imM2 = cf.minkowski()
-                m0.append(cf.cloud_cover)
-                # imM0 does not seem to work properly : even when scaled by cf.n_tot,
-                # its value shows a decreasing trend as the image gets subsampled.
-                # One wonders whether M1 and M2 work properly...
-                m1.append(imM1 * s / total_area)
-                m2.append(imM2 / total_area)
-
-            M0.append(m0) 
-            M1.append(m1)
-            M2.append(m2)
-
-        M0 = np.array(M0)
-        M1 = np.array(M1)
-        M2 = np.array(M2)
-
-        m0_mean = np.mean(M0, axis=0)
-        m1_mean = np.mean(M1, axis=0)
-        m2_mean = np.mean(M2, axis=0)
-
-        m0_std = np.std(M0, axis=0, ddof=1)
-        m1_std = np.std(M1, axis=0, ddof=1)
-        m2_std = np.std(M2, axis=0, ddof=1)
-
-        # ax[0].plot(resol, m0_mean, color=colors_list[i], alpha=0.5)
-        ax[0].plot(resol, m1_mean, color=colors_list[i], alpha=0.5)
-        ax[1].plot(resol, m2_mean, color=colors_list[i], alpha=0.5)
-        # ax[0].fill_between(resol, m0_mean+m0_std/np.sqrt(N_stat),
-        #                    m0_mean-m0_std/np.sqrt(N_stat), 
-        #                    color=colors_list[i], alpha=0.2)
-        ax[0].fill_between(resol, m1_mean+m1_std/np.sqrt(N_stat),
-                           m1_mean-m1_std/np.sqrt(N_stat), 
-                           color=colors_list[i], alpha=0.2)
-        ax[1].fill_between(resol, m2_mean+m2_std/np.sqrt(N_stat),
-                           m2_mean-m2_std/np.sqrt(N_stat), 
-                           color=colors_list[i], alpha=0.2)
+        ax[0].loglog(resol, m1, color=colors_list[i])
+        ax[1].loglog(resol, np.abs(m2), color=colors_list[i])
+        ax[2].semilogx(resol, m0, color=colors_list[i])
 
         if fit == 'powerlaw':
             #### FIT POISSON ####
 
-            mask1 = np.logical_and(fit_min<=resol, fit_max>=resol)
-            b1, log_a1, r1, p1, se1 = linregress(np.log(resol[mask1]), 
-                                                 np.log(m1_mean[mask1]))
-            mask2 = mask1
-            m2_sign = np.sign(m2_mean[mask2][0])
-            b2, log_a2, r2, p2, se2 = linregress(np.log(resol[mask2]),
-                                                 np.log(m2_sign*m2_mean[mask2]))
-            a1, a2 = np.exp(log_a1), np.exp(log_a2)
-            print(f'{colors_list[i]} : a1={a1:.3f} | b1={b1:.3f} | a2={a2:.3f} | b2={b2:.3f}')
+            mask = np.logical_and(fit_min<=resol, fit_max>=resol)
+            m2_sign = np.sign(m2[mask][0])
 
-            ax[0].plot(resol[mask1], a1*resol[mask1]**b1, '--', 
-                    color=colors_list[i], label=f'a = {a1:.2f}\nb = {b1:.2f}')
-            ax[1].plot(resol[mask2], m2_sign*a2*resol[mask2]**b2, '--', 
-                    color=colors_list[i], label=f'a = {a2:.3f}\nb = {b2:.2f}')
-            # ax[0].plot(resol, np.ones_like(resol) * m0_mean[0], '--',
-            #     color=colors_list[i], label=r'$m_0$ at best resolution')
+            def f(s, alpha, beta):
+                return alpha * s**beta
 
+            p0 = [0.1, -1]
+            popt1, pcov1 = curve_fit(f, resol[mask], m1[mask], p0=p0)
+            popt2, pcov2 = curve_fit(f, resol[mask], m2_sign*m2[mask], p0=p0)
+
+            alpha1, beta1 = popt1
+            alpha2, beta2 = popt2
+
+            print(f'{colors_list[i]} : alpha1={alpha1:.3f} | beta1={beta1:.3f} | alpha2={alpha2:.3f} | b2={beta2:.3f}')
+
+            ax[0].plot(resol[mask], alpha1*resol[mask]**beta1, '--', 
+                    color=colors_list[i], label=f'a = {alpha1:.2f}\nb = {beta1:.2f}')
+            ax[1].plot(resol[mask], m2_sign*alpha2*resol[mask]**beta2, '--', 
+                    color=colors_list[i], label=f'a = {alpha2:.3f}\nb = {beta2:.2f}')
 
             #### SHOW RESIDUE ####
 
             # M1
-            err1 = m1_mean - (a1*resol**b1)
-            ax_err[0].plot(resol, np.abs(err1), color=colors_list[i])
-            ax_err[0].fill_between(resol, np.abs(err1)+m1_std/np.sqrt(N_stat)/(a1*resol**b1),
-                                   np.abs(err1)-m1_std/np.sqrt(N_stat)/(a1*resol**b1),
-                                   color=colors_list[i], alpha=0.2)
-
+            ax_err[0].loglog(resol, m1, color=colors_list[i])
+            ax_err[0].loglog(resol[mask], alpha1*resol[mask]**beta1, '--', 
+                             color='black')
+    
             # M2
-            err2 = m2_mean - (a2*resol**b2)
-            ax_err[1].plot(resol, np.abs(err2), color=colors_list[i])
-            ax_err[1].fill_between(resol, np.abs(err2)+m2_std/np.sqrt(N_stat)/(a2*resol**b2),
-                                   np.abs(err2)-m2_std/np.sqrt(N_stat)/(a2*resol**b2),
-                                   color=colors_list[i], alpha=0.2)
+            ax_err[1].loglog(resol, m2_sign*m2, color=colors_list[i])
+            ax_err[1].loglog(resol[mask], alpha2*resol[mask]**beta2, '--', 
+                             color='black')
 
             if save:
                 fig_err.savefig('output_figures/MF_resolution_analysis_err_'+root_name+'.pdf', 
@@ -475,60 +499,53 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
             def f(s, a, b, c):
                 return a * np.exp(-s/b) + c
 
-            p1 = [m1_mean[mask][0] - m1_mean[mask][-1],
+            p1 = [m1[mask][0] - m1[mask][-1],
                   resol[mask][-1] - resol[mask][0],
-                  m1_mean[mask][-1]]
-            popt1, pcov1 = curve_fit(f, resol[mask], m1_mean[mask], p0=p1,
+                  m1[mask][-1]]
+            popt1, pcov1 = curve_fit(f, resol[mask], m1[mask], p0=p1,
                                      bounds=([-10, 0, -10], [10, 100, 10]))
             a1, b1, c1 = popt1
-            ax[0].plot(resol[mask], f(resol[mask], *popt1), '--', color=colors_list[i])
+            ax[0].loglog(resol[mask], f(resol[mask], *popt1), '--', 
+                         color='black')
             
-            p2 = [m2_mean[mask][0] - m2_mean[mask][-1],
+            p2 = [m2[mask][0] - m2[mask][-1],
                   resol[mask][-1] - resol[mask][0],
-                  m2_mean[mask][-1]]
-            popt2, pcov2 = curve_fit(f, resol[mask], m2_mean[mask], p0=p2,
+                  m2[mask][-1]]
+            popt2, pcov2 = curve_fit(f, resol[mask], m2[mask], p0=p2,
                                      bounds=([-10, 0, -10], [10, 100, 10]))
             a2, b2, c2 = popt2
-            ax[1].plot(resol[mask], f(resol[mask], *popt2), '--', color=colors_list[i])
+            ax[1].loglog(resol[mask], np.abs(f(resol[mask], *popt2)), '--', 
+                         color='black')
             
-            # ax[0].plot(resol, np.ones_like(resol) * m0_mean[0], '--',
-            #            color=colors_list[i], label=r'$m_0$ at best resolution')
 
-            print(f'{colors_list[i]} : cc={m0_mean[0]:.2f} | '
+            print(f'{colors_list[i]} : cc={m0[0]:.2f} | '
                   + f'a1={a1:.3f} | b1={b1:.3f} | c1={c1:.3f} '
                   + f'| a2={a2:.3f} | b2={b2:.3f} | c2={c2:.4f}')
 
             #### SHOW RESIDUE ####
 
             # M1
-            err1 = m1_mean - f(resol, *popt1)
-            ax_err[0].plot(resol, np.abs(err1), color=colors_list[i])
-            ax_err[0].fill_between(resol, np.abs(err1)+m1_std/np.sqrt(N_stat)/f(resol, *popt1),
-                                   np.abs(err1)-m1_std/np.sqrt(N_stat)/f(resol, *popt1),
-                                   color=colors_list[i], alpha=0.2)
+            err1 = m1 - f(resol, *popt1)
+            ax_err[0].semilogx(resol[mask], err1[mask], color=colors_list[i])
 
             # M2
-            err2 = m2_mean - f(resol, *popt2)
-            ax_err[1].plot(resol, np.abs(err2), color=colors_list[i])
-            ax_err[1].fill_between(resol, np.abs(err2)+m2_std/np.sqrt(N_stat)/f(resol, *popt2),
-                                   np.abs(err2)-m2_std/np.sqrt(N_stat)/f(resol, *popt2),
-                                   color=colors_list[i], alpha=0.2)
+            err2 = m2 - f(resol, *popt2)
+            ax_err[1].semilogx(resol[mask], err2[mask], color=colors_list[i])
 
             if save:
                 fig_err.savefig('output_figures/MF_resolution_analysis_err_'+root_name+'.pdf', 
                             bbox_inches='tight')
 
-    # ax[0].set_xlabel(r'Resolution $s$ [km/px]')
-    # ax[0].set_title(r'Cloud cover $m_0$')
-    # ax[0].grid()
-
     ax[0].set_xlabel(r'Resolution $s$ [km/px]')
-    ax[0].set_ylabel(r'Interface density $m_1$ [km/km²]')
+    ax[0].set_ylabel(r'$m_1$ [km/km²]')
     ax[0].grid()
 
     ax[1].set_xlabel(r'Resolution $s$ [km/px]')
-    ax[1].set_ylabel(r'Euler characteristic $m_2$ [km$^{-2}$]')
+    ax[1].set_ylabel(r'$m_2$ [km$^{-2}$]')
     ax[1].grid()
+
+    ax[2].set_ylabel(r'$m_0$ [km²/km²]')
+    ax[2].grid(which='both')
 
     if save:
         fig.savefig('output_figures/MF_resolution_analysis_'+root_name+'.pdf', 
@@ -565,53 +582,49 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
 
 # fonction qui produit la figure résolution grossière
 def MF_coarse_resolution(save=False):
-    _MF_resolution(s_min=.03, s_max=10,
-                  fit_min=4, fit_max=10, fit='powerlaw',
+    _MF_resolution(s_min=.03, s_max=7,
+                  fit_min=4, fit_max=7, fit='powerlaw',
                   save=save, root_name='coarse',
-                  N_stat=10)
+                  N_points=400)
 
 # fonction qui produit la figure résolution fine
 def MF_fine_resolution(save=False):
-    _MF_resolution(s_min=.03, s_max=.18,
+    _MF_resolution(s_min=.03, s_max=30,
                   fit_min=.03, fit_max=.18, fit='exponential',
                   save=save, root_name='fine',
-                  N_stat=30, N_points=30)
+                  N_points=100)
 
-def MF_subsampled_resolution(save=False):
-    fig, ax = plt.subplots(2, 3, figsize=(9,6),
+def MF_subsampled_resolution(cf_name='Nuages/20260527_petitsnuages.jpeg', save=False):
+    fig, ax = plt.subplots(3, 3, figsize=(9,9),
                            gridspec_kw={'wspace':0, 'hspace':0})
     ax = ax.flatten()
-    cf_name = 'Nuages/20260527_typical.jpeg'
     size=5000
     scale=0.03 #km/px
     thresh=150
 
-    resol = [0.03, 0.18, 1, 3, 6, 10]
+    resol = np.logspace(np.log10(0.03), np.log10(30), 9)
 
     for i, s in enumerate(resol):
     
-        seed = np.random.random(size)
-        p = 1 - scale / s
-        mask = seed >= p
+        # seed = np.random.random(size)
+        # p = 1 - scale / s
+        # mask = seed >= p
         
-        img = image.image_to_binary_array(cf_name, thresh)
-        img = img[:size,:size] # crop to square
-        img = img[mask][:,mask] # subsample
-        if img.shape[0] <= 2:
-            # s_max is too big
-            raise ValueError(f'img is too small {img.shape}')
+        img = image.image_to_binary_array(cf_name, thresh, factor=s/scale, size=size)
+    
+
         cf = CloudField(img)
 
         ax[i].set_axis_off()
         ax[i].imshow(img, cmap='binary_r')
 
-        # ax[i].text(int(size/50),size-int(size/50),
-        #            f'{s:.2f} km/px - {img.shape}',
-        #            backgroundcolor='white', fontsize=20)
+        ax[i].text(0, 0,
+                   f'{s:.2f} km/px',
+                   backgroundcolor='lightblue', fontsize=16)
 
-    # if save:
-    #     plt.savefig('output_figures/MF_subsampled_resolution.pdf', 
-    #             bbox_inches='tight')
+    if save:
+        plt.savefig('output_figures/MF_subsampled_resolution.pdf', 
+                bbox_inches='tight')
 
 
 def MF_resolution_poisson(save=False):
@@ -620,53 +633,54 @@ def MF_resolution_poisson(save=False):
 
     # Image to analyse
     cf_name = 'Nuages/Poisson_resolution.png'
-    scale = 60e-3 #km/px # value is arbitrary since not a satellite image
-    size = min(image.image_to_binary_array(cf_name, 150).shape)
+    scale = 30e-3 #km/px # value is arbitrary since not a satellite image
+    size = 5000
     total_area = size**2 * scale**2
 
     fig, ax = plt.subplots(1, 3, figsize=(13,3))
 
-    subsampling = np.arange(1, 1000, 10)
-    subscale, m0, m1, m2 = [], [], [], []
+    resol = np.linspace(0.03, 0.1, 100)
+    m0, m1, m2 = [], [], []
 
-    for step in subsampling:
+    for s in resol:
 
-        img = image.image_to_binary_array(cf_name, 150)
-        img = img[:size:step,:size:step] # crop to square and subsample
+        img = image.image_to_binary_array(cf_name, 
+                                          threshold=150, 
+                                          size=size, 
+                                          factor=s/scale)
+        
         cf = CloudField(img)
 
         imM0, imM1, imM2 = cf.minkowski()
-        subscale.append(step*scale)
         m0.append(cf.cloud_cover)
         # imM0 does not seem to work properly : even when scaled by cf.n_tot,
         # its value shows a decreasing trend as the image gets subsampled.
         # One wonders whether M1 and M2 work properly...
-        m1.append(imM1 * step * scale / total_area)
+        m1.append(imM1 * s / total_area)
         m2.append(imM2 / total_area)
 
-    subscale = np.array(subscale)
     m0 = np.array(m0) 
     m1 = np.array(m1)
     m2 = np.array(m2)
 
-    ax[0].plot(subscale, m0, color='blue')
-    ax[1].loglog(subscale, m1, color='blue')
-    ax[2].loglog(subscale, m2, color='blue')
+    ax[0].plot(resol, m0, color='blue')
+    ax[1].loglog(resol, m1, color='blue')
+    ax[2].loglog(resol, m2, color='blue')
 
     #### CURVE FIT ####
 
-    mask = subsampling < 100
-    b1, log_a1, r1, p1, se1 = linregress(np.log(subscale[mask]), np.log(m1[mask]))    
-    b2, log_a2, r2, p2, se2 = linregress(np.log(subscale[mask]), np.log(m2[mask]))  
+    mask = resol > 0
+    b1, log_a1, r1, p1, se1 = linregress(np.log(resol[mask]), np.log(m1[mask]))    
+    b2, log_a2, r2, p2, se2 = linregress(np.log(resol[mask]), np.log(m2[mask]))  
     a1, a2 = np.exp(log_a1), np.exp(log_a2)
 
-    ax[1].loglog(subscale, a1*subscale**b1, '--', color='red', 
+    ax[1].loglog(resol, a1*resol**b1, '--', color='red', 
                label=f'a = {a1:.5f}\nb = {b1:.5f}')
-    ax[2].loglog(subscale, a2*subscale**b2, '--', color='red', 
+    ax[2].loglog(resol, a2*resol**b2, '--', color='red', 
                 label=f'a = {a2:.5f}\nb = {b2:.5f}')
     
     ax[0].set_xlabel(r'Resolution $s$ [km/px]')
-    ax[0].plot(subscale, np.ones_like(subscale) * m0[0], '--',
+    ax[0].plot(resol, np.ones_like(resol) * m0[0], '--',
         color='red', label=r'$m_0$ at best resolution')
     ax[0].set_title(r'Cloud cover $m_0$')
     ax[0].grid()
@@ -690,23 +704,23 @@ def MF_resolution_poisson(save=False):
                     bbox_inches='tight')
     
 
-    #### SHOW SUBSAMPLED IMAGES ####
+    # #### SHOW SUBSAMPLED IMAGES ####
 
-    subsampling = np.logspace(0, np.log10(100), 4).astype(np.int32)
-    fig, ax = plt.subplots(1, 4, figsize=(13,3))
+    # subsampling = np.logspace(0, np.log10(100), 4).astype(np.int32)
+    # fig, ax = plt.subplots(1, 4, figsize=(13,3))
 
-    for i, step in enumerate(subsampling):
+    # for i, step in enumerate(subsampling):
 
-        img = image.image_to_binary_array(cf_name, 150)
-        img = img[:size:step,:size:step] # crop to square and subsample
+    #     img = image.image_to_binary_array(cf_name, 150)
+    #     img = img[:size:step,:size:step] # crop to square and subsample
 
-        ax[i].imshow(img, cmap='binary_r')
-        ax[i].set_axis_off()
-        ax[i].set_title(f'{step*scale:.2f} km/px - {img.shape}')
+    #     ax[i].imshow(img, cmap='binary_r')
+    #     ax[i].set_axis_off()
+    #     ax[i].set_title(f'{step*scale:.2f} km/px - {img.shape}')
 
-    if save:
-        plt.savefig('output_figures/MF_resolution_poisson_subsampled_img.pdf', 
-                bbox_inches='tight')
+    # if save:
+    #     plt.savefig('output_figures/MF_resolution_poisson_subsampled_img.pdf', 
+    #             bbox_inches='tight')
 
 def MF_resolution_disk(save=False):
 

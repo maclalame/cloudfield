@@ -2,13 +2,15 @@ import numpy as np
 from PIL import Image
 import cv2
 
-def image_to_binary_array(image_path, threshold=128):
+def image_to_binary_array(image_path, threshold=128, factor=1, size=None):
     """
     Converts RGB image into binary numpy array.
     
     Args:
         image_path (str): path to the image
         threshold (int): binarization thershold (0-255)
+        factor (int): subsampling factor
+        size (int): length of the side of the square (in pixels).
     
     Returns:
         np.array: binary array (0 or 1)
@@ -19,9 +21,18 @@ def image_to_binary_array(image_path, threshold=128):
     # Converts image into gray levels.
     img_gray = img.convert('L')
     img_array = np.array(img_gray)
-    
+
+    if size is None:
+        size = min(img_array.shape[:2])
+    img_cropped = img_array[:size, :size]
+
+    if factor != 1:
+        img_subsampled = resample(img_cropped, factor=factor)
+    else:
+        img_subsampled = img_cropped
+
     # Binarization
-    binary_array = (img_array >= threshold).astype(np.uint8)
+    binary_array = (img_subsampled >= threshold).astype(np.uint8)
     
     return binary_array
 
@@ -91,4 +102,4 @@ def resample(img_array, factor=1):
     h, w = img_array.shape[:2]
     return cv2.resize(img_array,
                       (round(w / factor), round(h / factor)),
-                      interpolation=cv2.INTER_LINEAR)
+                      interpolation=cv2.INTER_AREA)
