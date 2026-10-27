@@ -370,6 +370,71 @@ def corr_threshold(save=False):
         plt.savefig('output_figures/corr_threshold_subsampled_img.pdf', 
                 bbox_inches='tight')
 
+def test_mantz2008():
+    cf_names = ['Nuages/20260527_typical.jpeg',
+                'Nuages/20260527_convectionfermee.jpeg',
+                'Nuages/20260527_petitsnuages.jpeg',
+                'Nuages/20260527_moutonneux.jpeg',
+                'Nuages/20260527_typeL.jpeg',
+                'Nuages/20260527_anisotropic.jpeg']
+
+    scale = 30e-3 #km/px
+    thresh = 150
+    size = 5000
+    total_area = size**2 * scale**2
+
+    resol = np.logspace(np.log10(0.03), np.log10(0.2), 10)
+
+    fig, ax = plt.subplots(3, 1, figsize=(5,12),
+                            sharex=True,
+                            gridspec_kw={'hspace': 0})
+
+    for i, cf_name in enumerate(cf_names):
+    
+            cc, m1, m2, mantz0, mantz1, mantz2 = [], [], [], [], [], []
+    
+            for s in resol:
+    
+                f = s / scale
+                gray_img = image.image_to_float_array(cf_name, 
+                                                  factor=f, size=size)
+                cf = CloudField(gray_img=gray_img, thresh=thresh)
+    
+                imM0, imM1, imM2 = cf.minkowski()
+                cc.append(cf.cloud_cover)
+                m1.append(imM1 * s / total_area)
+                m2.append(imM2 / total_area)
+
+                mz0, mz1, mz2 = cf.mantz2008()
+                mantz0.append(mz0)
+                mantz1.append(mz1)
+                mantz2.append(mz2)
+    
+            cc = np.array(cc)
+            m1 = np.array(m1)
+            m2 = np.array(m2)
+            mantz0 = np.array(mantz0)
+            mantz1 = np.array(mantz1)
+            mantz2 = np.array(mantz2)
+
+
+            ax[0].semilogx(resol, cc, color=colors_list[i])
+            ax[0].semilogx(resol, mantz0, '--', color=colors_list[i])
+            ax[1].loglog(resol, m1, color=colors_list[i])
+            ax[1].loglog(resol, mantz1, '--', color=colors_list[i])
+            ax[2].semilogx(resol, np.abs(m2), color=colors_list[i])
+            ax[2].semilogx(resol, np.abs(mantz2), '--', color=coolors_list[i])
+
+    # ax[1].set_xlabel(r'Resolution $s$ [km/px]')
+    ax[1].set_ylabel(r'$m_1$ [km/km²]')
+    ax[1].grid()
+
+    ax[2].set_xlabel(r'Resolution $s$ [km/px]')
+    ax[2].set_ylabel(r'$m_2$ [km$^{-2}$]')
+    ax[2].grid()
+
+    ax[0].set_ylabel(r'$m_0$ [km²/km²]')
+    ax[0].grid(which='both')           
 
 # FIGURES RESOLUTION SENSITIVITY ANALYSIS
 
@@ -428,7 +493,7 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
 
     for i, cf_name in enumerate(cf_names):
 
-        m0, m1, m2 = [], [], []
+        cc, padcc, m0, m1, m2 = [], [], [], [], []
 
         for s in resol:
 
@@ -438,13 +503,14 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
             cf = CloudField(img)
 
             imM0, imM1, imM2 = cf.minkowski()
-            m0.append(cf.cloud_cover)
-            # imM0 does not seem to work properly : even when scaled by cf.n_tot,
-            # its value shows a decreasing trend as the image gets subsampled.
-            # One wonders whether M1 and M2 work properly...
+            cc.append(cf.cloud_cover)
+            padcc.append(cf.dpm_cloud_cover)
+            m0.append(imM0 / cf.size**2)
             m1.append(imM1 * s / total_area)
             m2.append(imM2 / total_area)
 
+        cc = np.array(cc)
+        padcc = np.array(padcc)
         m0 = np.array(m0)
         m1 = np.array(m1)
         m2 = np.array(m2)
@@ -452,6 +518,8 @@ def _MF_resolution(s_min, s_max, fit_min=None, fit_max=None,
         ax[0].loglog(resol, m1, color=colors_list[i])
         ax[1].loglog(resol, np.abs(m2), color=colors_list[i])
         ax[2].semilogx(resol, m0, color=colors_list[i])
+        ax[2].semilogx(resol, cc, color='black')
+        ax[2].semilogx(resol, padcc, '--', color='black')
 
         if fit == 'powerlaw':
             #### FIT POISSON ####

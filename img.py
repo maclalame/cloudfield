@@ -2,13 +2,62 @@ import numpy as np
 from PIL import Image
 import cv2
 
-def image_to_binary_array(image_path, threshold=128, factor=1, size=None):
+### BASIC FUNCTIONS
+
+def crop_to_square(img_array, size=None):
+
+    if size is None:
+        size = min(img_array.shape[:2])
+
+    return img_array[:size, :size]
+
+def resample(img_array, factor=1):
+
+    if factor==1:
+        return img_array
+
+    h, w = img_array.shape[:2]
+    
+    return cv2.resize(img_array,
+                      (round(w / factor), round(h / factor)),
+                      interpolation=cv2.INTER_AREA)
+
+
+### LOADING FUNCTIONS
+
+def image_to_float_array(image_path, factor=1, size=None):
+
     """
     Converts RGB image into binary numpy array.
     
     Args:
         image_path (str): path to the image
-        threshold (int): binarization thershold (0-255)
+        factor (int): subsampling factor
+        size (int): length of the side of the square (in pixels).
+    
+    Returns:
+        np.array: float array (0. to 255.)
+    """
+        
+    img = Image.open(image_path)
+
+    # Converts image into gray levels.
+    img_gray = img.convert("L")
+    img_array = np.array(img_gray, dtype=float)
+    img_cropped = crop_to_square(img_array, size=size)
+    img_subsampled = resample(img_cropped, factor=factor)
+
+    return img_subsampled
+
+
+def image_to_binary_array(image_path, thresh=128, factor=1, size=None):
+
+    """
+    Converts RGB image into binary numpy array.
+    
+    Args:
+        image_path (str): path to the image
+        thresh (int): binarization thershold (0-255)
         factor (int): subsampling factor
         size (int): length of the side of the square (in pixels).
     
@@ -16,28 +65,16 @@ def image_to_binary_array(image_path, threshold=128, factor=1, size=None):
         np.array: binary array (0 or 1)
     """
 
-    img = Image.open(image_path)
-    
-    # Converts image into gray levels.
-    img_gray = img.convert('L')
-    img_array = np.array(img_gray)
-
-    if size is None:
-        size = min(img_array.shape[:2])
-    img_cropped = img_array[:size, :size]
-
-    if factor != 1:
-        img_subsampled = resample(img_cropped, factor=factor)
-    else:
-        img_subsampled = img_cropped
+    float_array = image_to_float_array(image_path, factor=factor, size=size)
 
     # Binarization
-    binary_array = (img_subsampled >= threshold).astype(np.uint8)
+    binary_array = (float_array >= thresh).astype(bool)
     
     return binary_array
 
 
-def image_to_density_array(image_path):
+def image_to_density_array(image_path, factor=1, size=None):
+    
     """
     Converts RGB image into float numpy array (between 0 and 1).
 
@@ -48,15 +85,13 @@ def image_to_density_array(image_path):
         np.array: float array (between 0 and 1)
     """
 
-    img = Image.open(image_path)
-    
-    # Converts image into gray levels
-    img_gray = img.convert('L')
-    img_array = np.array(img_gray)
-    img_density = img_array / 255
+    float_array = image_to_float_array(image_path, factor=factor, size=size)
+    img_density = float_array / 255
 
     return img_density
 
+
+### GENERATE FIELDS
 
 def poisson_field(size=500, cloud_cover=0.5, save_path=None):
     """
@@ -97,9 +132,3 @@ def disk(size=8000, r=3000, save_path=None):
         img.save(save_path)
 
     return img_array
-
-def resample(img_array, factor=1):
-    h, w = img_array.shape[:2]
-    return cv2.resize(img_array,
-                      (round(w / factor), round(h / factor)),
-                      interpolation=cv2.INTER_AREA)

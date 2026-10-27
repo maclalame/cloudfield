@@ -12,26 +12,55 @@ from dpm_tools.metrics import minkowski_functionals, minkowski_map
 
 class CloudField:
 
-    def __init__(self, img, r_max=0):
+    def __init__(self, bool_img=None, r_max=0, gray_img=None, thresh=None):
 
         """
         Parameters :
-        img : boolean or float [0,1] array. shape = square
+        bool_img : bool 2D array. shape = square
             Represents the cloud field.
         r_max : float
             Largest value for the radii axis (in pixels). Might be reset
-            to lower value in order to match the steps.
+            to lower value in order to match the steps, used for pair
+            correlation functions.
+        gray_img : float 2D array from 0. to 255. shape = sqaure
+            Cloud field in gray scale, used for Mantz 2008 algorithm.
+        thresh : float between 0. and 255.
+            Necessary for Mantz 2008 algorithm.
         """
 
+        # CHECK COHERENCE BETWEEN bool_img, gray_levels AND threshold
+        print('in init')
+        if gray_img is not None:
+            if thresh is None:
+                raise ValueError('Please specify thresh value.')
+            if bool_img is None:
+                bool_img = (gray_img >= thresh).astype(bool)
+            else:
+                check = (gray_img >= thresh).astype(bool) == bool_img
+                if np.sum(~check) != 0:
+                    raise ValueError('Incoherent bool_img, gray_img, thresh.')
+        else:
+            if bool_img is None:
+                raise ValueError("bool_img and gray_img can't both be None")
+        print('pass check')
         # CLOUD FELD ATTRIBUTES and NUMBA IMPLEMENTED CLASS
-        self._numba_impl = _CloudFieldNumba(img, r_max)
+        self._numba_impl = _CloudFieldNumba(bool_img, r_max)
         self.n_cloudy = self._numba_impl.n_cloudy
         self.n_clear = self._numba_impl.n_clear
         self.cloud_cover = self._numba_impl.cloud_cover
         self.box_cloud_cover = self._numba_impl.box_cloud_cover
+        self.dpm_cloud_cover = (np.sum(bool_img[1:-1,1:-1])
+                                + np.sum(bool_img[1:-1,-1])/2
+                                + np.sum(bool_img[-1,1:-1])/2
+                                + np.sum(bool_img[0,1:-1])/2
+                                + np.sum(bool_img[1:-1,0])/2
+                                + bool_img[0,0]/4
+                                + bool_img[0,-1]/4
+                                + bool_img[-1,0]/4
+                                + bool_img[-1,-1]/4) / bool_img.shape[0]**2
 
         # IMAGE ATTRIBUTES 
-        self.img = self._numba_impl.img
+        self.bool_img = self._numba_impl.bool_img
         self.size = self._numba_impl.size
         self.n_tot = self._numba_impl.n_tot
 
@@ -40,6 +69,10 @@ class CloudField:
         self.box_boundaries = self._numba_impl.box_boundaries
         self.box_img = self._numba_impl.box_img
         self.x0, self.y0, self.side = self.box_boundaries
+
+        # GRAY LEVELS
+        self.gray_img = gray_img
+        self.thresh = thresh
 
     def g(self, n_draws=10000, r_step=2):
 
@@ -172,14 +205,21 @@ class CloudField:
 
         return C_xy, C_r, C_angle
     
-    def minkowski(self):
+    def minkowski(self, correction=True):
 
         """
         Computes the absolute minkowski functionals M0 M1 and M2 
         using the package DPM Tools.
         """
 
-        return minkowski_functionals(self.img, pad=False)
+        M0, M1, M2 = minkowski_functionals(self.bool_img, pad=False)
+
+        # Edge effects correction
+        if correction:
+            M0 = (self.size / (self.size - 1))**2 * M0
+            M1 = self.size / (self.size - 1) * M1
+
+        return M0, M1, M2
     
     
     def MF_map(self):
@@ -188,17 +228,35 @@ class CloudField:
         Testing of the minkowski_map function from DPM Tools.
         """
 
-        M0, M1, M2 = minkowski_map(self.img, [self.r_max, self.r_max])
+        M0, M1, M2 = minkowski_map(self.bool_img, [self.r_max, self.r_max])
         map = np.zeros((self.size, self.size, 3))
         map[:,:,0] = M0
         map[:,:,1] = M1
         map[:,:,2] = M2
         return map
 
+    def mantz2008(self):
+
+        """
+        Implementation of the weighted marching squares algorithm 
+        introduced by Mantz et al. (2008), to compute Minkowski
+        Functionals.
+        """
+
+        if self.gray_img is None:
+            raise ValueError('Need gray_img and thresh for Mantz 2008.')
+
+        cf_mantz = _Mantz2008(bool_img = self.bool_img, 
+                              gray_img = self.gray_img, 
+                              thresh = self.thresh, 
+                              size = self.size)
+        
+        return cf_mantz.minkowski()
+
 
 
 spec = [
-    ('img', types.boolean[:,:]),
+    ('bool_img', types.boolean[:,:]),
     ('size', types.int32),
     ('n_tot', types.int32),
     ('n_cloudy', types.int32),
@@ -219,11 +277,11 @@ spec = [
 class _CloudFieldNumba:
     # This class contains numba-optimized methods.
 
-    def __init__(self, img, r_max):
-
+    def __init__(self, bool_img, r_max):
+        print('in init numba')
         """
         Parameters:
-        img : boolean array. shape = square
+        bool_img : boolean array. shape = square
             Binary array of the cloud field.
         r_max : float
             Largest value for the radii axis (in pixels). Might be reset
@@ -231,16 +289,17 @@ class _CloudFieldNumba:
         """
 
         # VERIFICATION
-        if img.shape[0] != img.shape[1]:
-            raise ValueError(f'img must be square : img.shape = {img.shape}')
+        if bool_img.shape[0] != bool_img.shape[1]:
+            raise ValueError('bool_img must be square : bool_img.shape = '
+                             + {bool_img.shape})
 
         # IMAGE ATTRIBUTES
-        self.img = img[:,:].copy()
-        self.size = img.shape[0]
+        self.bool_img = bool_img[:,:].copy()
+        self.size = bool_img.shape[0]
         self.n_tot = self.size * self.size
         
         # CLOUD FIELD ATTRIBUTES
-        self.n_cloudy = np.sum(img)
+        self.n_cloudy = np.sum(bool_img)
         self.n_clear = self.n_tot - self.n_cloudy
         self.cloud_cover = self.n_cloudy / self.n_tot
         
@@ -248,7 +307,7 @@ class _CloudFieldNumba:
         self.r_max = r_max
         x0, y0, side = r_max, r_max, self.size - 2*r_max
         self.box_boundaries = (x0, y0, side)
-        self.box_img = img[x0:x0+side, y0:y0+side]
+        self.box_img = bool_img[x0:x0+side, y0:y0+side]
         self.box_cloud_cover = np.sum(self.box_img) / side**2
 
     
@@ -324,7 +383,7 @@ class _CloudFieldNumba:
         for (i, j) in self.random_draw(n_draws, self.box_boundaries):
             
             # skip to next (i,j) if this (i,j) is a clear-sky pixel
-            is_cloudy_ij = self.img[i, j]
+            is_cloudy_ij = self.bool_img[i, j]
             if not is_cloudy_ij: continue 
 
             # hist_all is the distribution of all (k,l) pixels along r
@@ -345,7 +404,7 @@ class _CloudFieldNumba:
                     bin_idx = int(dist / r_step)
                     hist_all[bin_idx] += 1
                     # the % makes the boundary conditions periodic
-                    if self.img[k%self.size, l%self.size]: 
+                    if self.bool_img[k%self.size, l%self.size]: 
                         hist_cloudy[bin_idx] += 1
 
             # avoid division by 0 by isolating the cases where no (k,l) 
@@ -385,9 +444,9 @@ class _CloudFieldNumba:
 
         boundaries_ij = (self.r_max, self.r_max, self.size-2*self.r_max)
         for (i,j) in self.random_draw(n_draws, boundaries_ij):
-            neighborhood = self.img[i-self.r_max:i+self.r_max+1,
+            neighborhood = self.bool_img[i-self.r_max:i+self.r_max+1,
                                     j-self.r_max:j+self.r_max+1]
-            if self.img[i, j]:
+            if self.bool_img[i, j]:
                 corr_img += neighborhood - ~neighborhood
             else:
                 corr_img += ~neighborhood - neighborhood
@@ -417,9 +476,9 @@ class _CloudFieldNumba:
 
         boundaries_ij = (self.r_max, self.r_max, self.size-2*self.r_max)
         for (i,j) in self.random_draw(n_draws, boundaries_ij):
-            neighborhood = self.img[i-self.r_max:i+self.r_max+1,
+            neighborhood = self.bool_img[i-self.r_max:i+self.r_max+1,
                                     j-self.r_max:j+self.r_max+1]
-            if self.img[i, j]:
+            if self.bool_img[i, j]:
                 corr_img += neighborhood
             n_img += 1
 
@@ -427,12 +486,218 @@ class _CloudFieldNumba:
         C = corr_img / n_img
     
         return C
-    
-if False:
-    img_path = 'Nuages/trous_OI_60m.png'
-    img_array = image.image_to_binary_array(img_path, threshold=150)[:5000,:5000]
-    cf = CloudField(img_array, r_max=100)
 
+
+spec = [
+    ('bool_img', types.boolean[:,:]),
+    ('gray_img', types.float64[:,:]),
+    ('thresh', types.uint8),
+    ('size', types.int32),
+    ('M2_Table', types.float64[:]),
+    ('i_rows', types.int32),
+    ('i_cols', types.int32)
+]
+
+@jitclass(spec)
+class _Mantz2008:
+
+    """
+    The role of the _Mantz2008 class is to implement the weighted
+    marching square algorithm from Mantz et al. (2008) to cloud fields.
+    The method minkowski computes the Minkowski Functionals according to
+    this algorithm.
+
+    Parameters:
+    Given by the CloudField class.
+    """
+
+    def __init__(self, bool_img, gray_img, thresh, size):
+
+        self.bool_img = bool_img
+        self.gray_img = gray_img
+        self.thresh = thresh
+        self.size = size
+        self.M2_Table = np.array([0.0,
+                                  0.25,
+                                  0.25,
+                                  0.0,
+                                  0.25,
+                                  -0.5,
+                                  0.0,
+                                  -0.25,
+                                  0.25,
+                                  0.0,
+                                  -0.5,
+                                  -0.25,
+                                  0.0,
+                                  -0.25,
+                                  -0.25,
+                                  0.0])
+        print('init ok')
+
+    def _configuration(self, i_rows, i_cols):
+        config = 0
+        if self.bool_img[i_rows, i_cols]: config |= 8
+        if self.bool_img[i_rows, i_cols + 1]: config |= 4
+        if self.bool_img[i_rows + 1, i_cols + 1]: config |= 2
+        if self.bool_img[i_rows + 1, i_cols]: config |= 1
+        return config
+
+    def _M0_M1_config(self, config, i_rows, i_cols):
+  
+        # Raccourcis pour alléger l'écriture des pixels
+        p_tl = self.gray_img[i_rows, i_cols]           # Top-Left
+        p_tr = self.gray_img[i_rows, i_cols + 1]       # Top-Right
+        p_br = self.gray_img[i_rows + 1, i_cols + 1]   # Bottom-Right
+        p_bl = self.gray_img[i_rows + 1, i_cols]       # Bottom-Left
+
+        # Config 0
+        if config == 0:     
+            return 0.0, 0.0
+
+        # Config 15
+        elif config == 15:  
+            return 1.0, 0.0
+
+        # Config 1 : Coupe les arêtes 3 et 4 (intercepte p_bl)
+        elif config == 1:
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 0.5 * X4 * (1.0 - X3)
+            M1 = np.sqrt(X4**2 + (1.0 - X3) ** 2)
+            return M0, M1 
+
+        # Config 2 : Coupe les arêtes 2 et 3 (intercepte p_br)
+        elif config == 2:
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            M0 = 0.5 * X3 * (1.0 - X2)
+            M1 = np.sqrt(X3**2 + (1.0 - X2) ** 2)
+            return M0, M1 
+
+        # Config 3 : Coupe les arêtes 2 et 4
+        elif config == 3:
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 0.5 * (1.0 - X2 + X4)
+            M1 = np.sqrt(1.0 + (1.0 - X2 - X4) ** 2)
+            return M0, M1 
+
+        # Config 4 : Coupe les arêtes 1 et 2 (intercepte p_tr)
+        elif config == 4:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            M0 = 0.5 * X2 * (1.0 - X1)
+            M1 = np.sqrt(X2**2 + (1.0 - X1) ** 2)
+            return M0, M1 
+
+        # Config 5 : Cas double (coupe 1, 4 et 2, 3)
+        elif config == 5:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 1.0 - 0.5 * X1 * (1.0 - X4) - 0.5 * X3 * (1.0 - X2)
+            M1 = np.sqrt(X1**2 + (1.0-X4)**2) + np.sqrt(X3**2 + (1.0-X2)**2)
+            return M0, M1
+
+        # Config 6 : Coupe les arêtes 1 et 3
+        elif config == 6:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            M0 = 0.5 * (1.0 - X1 + X3)
+            M1 = np.sqrt(1.0 + (X3 + X1 - 1.0) ** 2)
+            return M0, M1
+
+        # Config 7 : Coupe les arêtes 1 et 4
+        elif config == 7:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 1.0 - 0.5 * X1 * (1.0 - X4)
+            M1 = np.sqrt(X1**2 + (1.0 - X4) ** 2)
+            return M0, M1 
+
+        # Config 8 : Coupe les arêtes 1 et 4 (symétrique à 7)
+        elif config == 8:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 0.5 * X1 * (1.0 - X4)
+            M1 = np.sqrt(X1**2 + (1.0 - X4) ** 2)
+            return M0, M1 
+
+        # Config 9 : Coupe les arêtes 1 et 3 (symétrique à 6)
+        elif config == 9:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            M0 = 0.5 * (1.0 - X3 + X1)
+            M1 = np.sqrt(1.0 + (1.0 - X3 - X1) ** 2)
+            return M0, M1 
+
+        # Config 10 : Cas double (coupe 1, 2 et 3, 4)
+        elif config == 10:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 1.0 - 0.5 * X2 * (1.0 - X1) - 0.5 * X4 * (1.0 - X3)
+            M1 = np.sqrt(X4**2 + (1.0-X3)**2) + np.sqrt(X2**2 + (1.0-X1)**2)
+            return M0, M1
+
+        # Config 11 : Coupe les arêtes 1 et 2
+        elif config == 11:
+            X1 = (self.thresh - p_tl) / (p_tr - p_tl)
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            M0 = 1.0 - 0.5 * X2 * (1.0-X1)
+            M1 = np.sqrt(X2**2 + (1.0-X1)**2)
+            return M0, M1 
+
+        # Config 12 : Coupe les arêtes 2 et 4
+        elif config == 12:
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 0.5 * (1.0 - X4 + X2)
+            M1 = np.sqrt(1.0 + (1.0 - X4 - X2) ** 2)
+            return M0, M1 
+
+        # Config 13 : Coupe les arêtes 2 et 3
+        elif config == 13:
+            X2 = (self.thresh - p_tr) / (p_br - p_tr)
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            M0 = 1.0 - 0.5 * X3 * (1.0 - X2)
+            M1 = np.sqrt(X3**2 + (1.0 - X2) ** 2)
+            return M0, M1 
+
+        # Config 14 : Coupe les arêtes 3 et 4
+        else:
+            X3 = (self.thresh - p_br) / (p_bl - p_br)
+            X4 = (self.thresh - p_bl) / (p_tl - p_bl)
+            M0 = 1.0 - 0.5 * X4 * (1.0 - X3)
+            M1 = np.sqrt(X4**2 + (1.0 - X3) ** 2)
+            return M0, M1
+
+    def minkowski(self):
+        M0, M1, M2 = 0., 0., 0.
+
+        for i_rows in range(self.size - 1):
+            for i_cols in range(self.size - 1):
+                
+                config = self._configuration(i_rows, i_cols)
+                dM0, dM1 = self._M0_M1_config(config, i_rows, i_cols)
+
+                M0 += dM0
+                M1 += dM1
+                M2 += self.M2_Table[config]       # Direct access
+                
+        return M0, M1, M2
+
+    
+    
+if True:
+    img_path = 'Nuages/trous_OI_60m.png'
+    bool_img = image.image_to_binary_array(img_path, thresh=150, size=5000)
+    gray_img = image.image_to_float_array(img_path, size=5000)
+    cf = CloudField(bool_img=bool_img, gray_img=gray_img, thresh=150)
+    print('class ok')
     scale = 60e-3 #km/px
     area = cf.size**2 * scale**2
 
@@ -443,6 +708,15 @@ if False:
     m0 = M0 * scale**2 / area
     m1 = M1 * scale / area
     m2 = M2 / area
+    print((m0, m1, m2))
+
+    M0, M1, M2 = cf.mantz2008()
+
+    # Scaling and normalizing
+    m0 = M0 * scale**2 / area
+    m1 = M1 * scale / area
+    m2 = M2 / area
+    print((m0, m1, m2))
 
 
 
