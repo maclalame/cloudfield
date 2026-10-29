@@ -29,7 +29,7 @@ class CloudField:
         """
 
         # CHECK COHERENCE BETWEEN bool_img, gray_levels AND threshold
-        print('in init')
+
         if gray_img is not None:
             if thresh is None:
                 raise ValueError('Please specify thresh value.')
@@ -42,22 +42,13 @@ class CloudField:
         else:
             if bool_img is None:
                 raise ValueError("bool_img and gray_img can't both be None")
-        print('pass check')
+
         # CLOUD FELD ATTRIBUTES and NUMBA IMPLEMENTED CLASS
         self._numba_impl = _CloudFieldNumba(bool_img, r_max)
         self.n_cloudy = self._numba_impl.n_cloudy
         self.n_clear = self._numba_impl.n_clear
         self.cloud_cover = self._numba_impl.cloud_cover
         self.box_cloud_cover = self._numba_impl.box_cloud_cover
-        self.dpm_cloud_cover = (np.sum(bool_img[1:-1,1:-1])
-                                + np.sum(bool_img[1:-1,-1])/2
-                                + np.sum(bool_img[-1,1:-1])/2
-                                + np.sum(bool_img[0,1:-1])/2
-                                + np.sum(bool_img[1:-1,0])/2
-                                + bool_img[0,0]/4
-                                + bool_img[0,-1]/4
-                                + bool_img[-1,0]/4
-                                + bool_img[-1,-1]/4) / bool_img.shape[0]**2
 
         # IMAGE ATTRIBUTES 
         self.bool_img = self._numba_impl.bool_img
@@ -220,8 +211,7 @@ class CloudField:
             M1 = self.size / (self.size - 1) * M1
 
         return M0, M1, M2
-    
-    
+       
     def MF_map(self):
 
         """
@@ -255,7 +245,7 @@ class CloudField:
 
 
 
-spec = [
+spec1 = [
     ('bool_img', types.boolean[:,:]),
     ('size', types.int32),
     ('n_tot', types.int32),
@@ -273,12 +263,12 @@ spec = [
     ('box_boundaries', types.UniTuple(types.int32, 3)),
 ]
 
-@jitclass(spec)
+@jitclass(spec1)
 class _CloudFieldNumba:
     # This class contains numba-optimized methods.
-
+    
     def __init__(self, bool_img, r_max):
-        print('in init numba')
+
         """
         Parameters:
         bool_img : boolean array. shape = square
@@ -287,19 +277,19 @@ class _CloudFieldNumba:
             Largest value for the radii axis (in pixels). Might be reset
             to lower value in order to match the steps.
         """
-
+        
         # VERIFICATION
         if bool_img.shape[0] != bool_img.shape[1]:
-            raise ValueError('bool_img must be square : bool_img.shape = '
-                             + {bool_img.shape})
-
+            raise ValueError('bool_img must be square : '
+                             + f'bool_img.shape = {bool_img.shape}')
+        
         # IMAGE ATTRIBUTES
         self.bool_img = bool_img[:,:].copy()
         self.size = bool_img.shape[0]
         self.n_tot = self.size * self.size
         
         # CLOUD FIELD ATTRIBUTES
-        self.n_cloudy = np.sum(bool_img)
+        self.n_cloudy = np.count_nonzero(bool_img)
         self.n_clear = self.n_tot - self.n_cloudy
         self.cloud_cover = self.n_cloudy / self.n_tot
         
@@ -307,10 +297,9 @@ class _CloudFieldNumba:
         self.r_max = r_max
         x0, y0, side = r_max, r_max, self.size - 2*r_max
         self.box_boundaries = (x0, y0, side)
-        self.box_img = bool_img[x0:x0+side, y0:y0+side]
+        self.box_img = bool_img[x0:x0+side, y0:y0+side].copy()
         self.box_cloud_cover = np.sum(self.box_img) / side**2
-
-    
+         
     def random_draw(self, n_draws, boundaries):
 
         """
@@ -345,8 +334,7 @@ class _CloudFieldNumba:
         sample = sample.astype(np.int32)
 
         return sample
-
-    
+   
     def compute_g(self, n_draws, r_step):
 
         """
@@ -488,7 +476,7 @@ class _CloudFieldNumba:
         return C
 
 
-spec = [
+spec2 = [
     ('bool_img', types.boolean[:,:]),
     ('gray_img', types.float64[:,:]),
     ('thresh', types.uint8),
@@ -498,7 +486,7 @@ spec = [
     ('i_cols', types.int32)
 ]
 
-@jitclass(spec)
+@jitclass(spec2)
 class _Mantz2008:
 
     """
@@ -533,7 +521,6 @@ class _Mantz2008:
                                   -0.25,
                                   -0.25,
                                   0.0])
-        print('init ok')
 
     def _configuration(self, i_rows, i_cols):
         config = 0
@@ -690,14 +677,13 @@ class _Mantz2008:
                 
         return M0, M1, M2
 
+
     
-    
-if True:
+if False:
     img_path = 'Nuages/trous_OI_60m.png'
-    bool_img = image.image_to_binary_array(img_path, thresh=150, size=5000)
+    # bool_img = image.image_to_binary_array(img_path, thresh=150, size=5000)
     gray_img = image.image_to_float_array(img_path, size=5000)
     cf = CloudField(bool_img=bool_img, gray_img=gray_img, thresh=150)
-    print('class ok')
     scale = 60e-3 #km/px
     area = cf.size**2 * scale**2
 

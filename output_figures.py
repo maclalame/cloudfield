@@ -406,9 +406,9 @@ def test_mantz2008():
                 m2.append(imM2 / total_area)
 
                 mz0, mz1, mz2 = cf.mantz2008()
-                mantz0.append(mz0)
-                mantz1.append(mz1)
-                mantz2.append(mz2)
+                mantz0.append(mz0 * s**2 / total_area)
+                mantz1.append(mz1 * s / total_area)
+                mantz2.append(mz2 / total_area)
     
             cc = np.array(cc)
             m1 = np.array(m1)
@@ -423,7 +423,7 @@ def test_mantz2008():
             ax[1].loglog(resol, m1, color=colors_list[i])
             ax[1].loglog(resol, mantz1, '--', color=colors_list[i])
             ax[2].semilogx(resol, np.abs(m2), color=colors_list[i])
-            ax[2].semilogx(resol, np.abs(mantz2), '--', color=coolors_list[i])
+            ax[2].semilogx(resol, np.abs(mantz2), '--', color=colors_list[i])
 
     # ax[1].set_xlabel(r'Resolution $s$ [km/px]')
     ax[1].set_ylabel(r'$m_1$ [km/km²]')
