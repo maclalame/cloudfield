@@ -11,7 +11,16 @@ from scipy.stats import linregress
 
 
 colors_list = ['blue', 'orange', 'red', 'green', 'darkmagenta', 'magenta', 'darkred']
-plt.rcParams['font.size'] = 16
+plt.rcParams['font.size'] = 20
+
+labels = ['A', 'B', 'C', 'D', 'E', 'F']
+
+cf_names = ['Nuages/20260527_typical.jpeg',
+            'Nuages/20260527_convectionfermee.jpeg',
+            'Nuages/20260527_petitsnuages.jpeg',
+            'Nuages/20260527_moutonneux.jpeg',
+            'Nuages/20260527_typeL.jpeg',
+            'Nuages/20220419_rue2nuages.jpeg']
 
 def corr_simple_cases(save=False):
 
@@ -118,15 +127,6 @@ def display_cloudfields(save=False):
 
     #### DISPLAY CLOUD FIELDS ####
 
-    labels = ['A', 'B', 'C', 'D', 'E', 'F']
-
-    cf_names = ['Nuages/20260527_typical.jpeg',
-                'Nuages/20260527_convectionfermee.jpeg',
-                'Nuages/20260527_petitsnuages.jpeg',
-                'Nuages/20260527_moutonneux.jpeg',
-                'Nuages/20260527_typeL.jpeg',
-                'Nuages/20260527_anisotropic.jpeg']
-
     fig, ax = plt.subplots(2, 3, figsize=(9,6),
                            gridspec_kw={'wspace':0, 'hspace':0},
                            sharey=True, sharex=True)
@@ -163,7 +163,7 @@ def corr_length(cf_name='Nuages/20260527_typical.jpeg', plot=False):
     r = np.arange(len(C_r)) * scale
 
     def f(r, delta):
-        cste=(2*cf.cloud_cover-1)**2
+        cste=(2*cf.box_cloud_cover-1)*(2*cf.cloud_cover - 1)
         B = cste / (1-cste)
         return (np.exp(-r/delta) + B) / (1 + B)
 
@@ -190,6 +190,117 @@ def corr_length(cf_name='Nuages/20260527_typical.jpeg', plot=False):
 
     return delta
 
+def corr_cloudfields(save=False):
+    r_max = 1250
+    thresh = 150
+    scale = 0.03 # km/px
+    size=5000
+    
+    fig, ax = plt.subplots(6, 4, figsize=(22,41))
+
+    norm=colors.TwoSlopeNorm(vmin=-1., vcenter=0., vmax=1.)
+    img_norm = colors.TwoSlopeNorm(vmin=0, vcenter=0.5, vmax=1)
+
+    cf_list = []
+    for cf_n in cf_names:
+        img = image.image_to_binary_array(cf_n, thresh=thresh, size=size)[::-1,:]
+        cf = CloudField(img, r_max=r_max)
+        cf_list.append(cf)
+
+    for i, cf in enumerate(cf_list):
+        C_xy, C_r, C_angle = [], [], []
+
+        N = 1
+        for _ in range(N):
+            C_xy_, C_r_, C_angle_ = cf.C(n_draws=3000)
+            C_xy.append(C_xy_)
+            C_r.append(C_r_)
+            C_angle.append(C_angle_)
+
+        C_xy = np.array(C_xy)
+        C_r = np.array(C_r)
+        C_angle = np.array(C_angle)
+
+        C_xy_mean = np.mean(C_xy, axis=0)
+        C_r_mean = np.mean(C_r, axis=0)
+        C_angle_mean = np.mean(C_angle, axis=0)
+
+        # C_xy_std = np.std(C_xy, axis=0)
+        # C_r_std = np.std(C_r, axis=0, ddof=1)
+        # C_angle_std = np.std(C_angle, axis=0)
+
+        r = np.arange(len(C_r_mean)) * scale
+
+        def f(r, delta):
+            cste=(2*cf.box_cloud_cover-1)*(2*cf.cloud_cover - 1)
+            B = cste / (1-cste)
+            return (np.exp(-r/delta) + B) / (1 + B)
+
+        max_fit = 1
+        mask = r < max_fit
+        p0 = [1.5]
+        popt, pcov = curve_fit(f, r[mask], C_r_mean[mask], p0)
+        delta = popt[0]
+
+        ax[i,0].imshow(cf.bool_img, cmap='binary_r', norm=img_norm, origin='lower',
+                       extent=[0, size*scale, 0, size*scale])
+        ax[i,1].imshow(C_xy_mean, cmap='RdBu_r', norm=norm, origin='lower',
+                    extent=[-cf.r_max*scale,cf.r_max*scale,-cf.r_max*scale,cf.r_max*scale])
+        ax[i,2].plot(r, C_r_mean, color='black', label=r'C(r)')
+        ax[i,2].plot(r, f(r, *popt), '--', color='red', alpha=.7)
+        # ax[i,2].fill_between(np.arange(len(C_r_mean))*scale,
+        #                         C_r_mean+C_r_std/np.sqrt(N),
+        #                         C_r_mean-C_r_std/np.sqrt(N),
+        #                         color='black', alpha=0.4)
+        ax[i,3].plot(np.arange(len(C_angle_mean)), 
+                        C_angle_mean, color='black', label=r'$C(\theta)$')
+        # ax[i,3].fill_between(np.arange(len(C_angle_mean)),
+        #                 C_angle_mean+C_angle_std/np.sqrt(N),
+        #                 C_angle_mean-C_angle_std/np.sqrt(N),
+        #                 color='black', alpha=0.4)           
+
+        side = cf.size - 2*cf.r_max
+        square = patches.Rectangle((cf.r_max*scale, cf.r_max*scale), side*scale, side*scale, 
+                                edgecolor='red', facecolor='none')
+        ax[i,0].add_patch(square)
+
+
+        # LABELS
+        ax[i,3].legend()
+        ax[i,2].legend()
+        ax[i,2].grid()
+        if i==5:
+            ax[i,1].set_xlabel(r'$r_x$ [km]')
+            ax[i,0].set_xlabel(r'$x_x$ [km]')
+            ax[i,2].set_xlabel('Radius r [km]')
+            ax[i,3].set_xlabel(r'Angle $\theta$ [deg]')
+
+        ax[i,1].set_ylabel(r'$r_y$ [km]')
+        ax[i,0].set_ylabel(r'$x_y$ [km]')
+        ax[i,3].grid()
+
+        ax[i,1].text(-25,0,
+                        f'Mean = {C_xy_mean.mean():.2f}\nMax = {C_xy_mean.max():.2f}'  
+                    + f'\nMin = {C_xy_mean.min():.2f}',
+                    backgroundcolor='white', fontsize=20)
+        ax[i,0].text(0,0, f'c.c. = {cf.cloud_cover:.2f}', 
+                        backgroundcolor='white', fontsize=20)
+        ax[i,2].text(20,.9, r'$\ell_c =$ ' + f'{delta:.2f} km',
+                     backgroundcolor='white', fontsize=20)
+
+        if i==0:
+            ax[i,1].set_title(r'Spatial $C(\bf{r})$')
+            ax[i,2].set_title(r'Radial $C(r)$')
+            ax[i,3].set_title(r'Angular $C(\theta)$')
+
+
+    fig.colorbar(cm.ScalarMappable(norm=norm, cmap='RdBu_r'), ax=ax, 
+                location='top', shrink=0.4, 
+                label=r'Spatial correlation $C(\bf{r})$')
+
+    if save:
+        plt.savefig('output_figures/corr_cloudfields.pdf', 
+                    bbox_inches='tight')
 
 def corr_resolution(save=False):
 
@@ -383,7 +494,7 @@ def test_mantz2008():
     size = 5000
     total_area = size**2 * scale**2
 
-    resol = np.logspace(np.log10(0.03), np.log10(0.2), 10)
+    resol = np.logspace(np.log10(0.03), np.log10(0.2), 30)
 
     fig, ax = plt.subplots(3, 1, figsize=(5,12),
                             sharex=True,
@@ -422,8 +533,8 @@ def test_mantz2008():
             ax[0].semilogx(resol, mantz0, '--', color=colors_list[i])
             ax[1].loglog(resol, m1, color=colors_list[i])
             ax[1].loglog(resol, mantz1, '--', color=colors_list[i])
-            ax[2].semilogx(resol, np.abs(m2), color=colors_list[i])
-            ax[2].semilogx(resol, np.abs(mantz2), '--', color=colors_list[i])
+            ax[2].loglog(resol, np.abs(m2), color=colors_list[i])
+            ax[2].loglog(resol, np.abs(mantz2), '--', color=colors_list[i])
 
     # ax[1].set_xlabel(r'Resolution $s$ [km/px]')
     ax[1].set_ylabel(r'$m_1$ [km/km²]')
