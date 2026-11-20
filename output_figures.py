@@ -257,18 +257,10 @@ def corr_cloudfields(save=False):
                        extent=[0, size*scale, 0, size*scale])
         ax[i,1].imshow(C_xy_mean, cmap='RdBu_r', norm=norm, origin='lower',
                     extent=[-cf.r_max*scale,cf.r_max*scale,-cf.r_max*scale,cf.r_max*scale])
-        ax[i,2].plot(r, C_r_mean, color='black', label=r'C(r)')
-        ax[i,2].plot(r, f(r, *popt), '--', color='red', alpha=.7)
+        ax[i,2].loglog(r, C_r_mean, color='black', label=r'C(r)')
+        ax[i,2].loglog(r, f(r, *popt), '--', color='red', alpha=.7, label='exp')
         ax[i,3].plot(np.arange(len(C_angle_mean)), 
-                        C_angle_mean, color='black', label=r'$C(\theta)$')
-
-        max_fit = 1
-        min_fit = .1
-        mask = np.logical_and(r < max_fit, r > min_fit)
-        p0 = [1]
-        popt, pcov = curve_fit(g, r[mask], C_r_mean[mask], p0)
-        eta = popt[0]
-                            
+                        C_angle_mean, color='black', label=r'$C(\theta)$')         
 
         side = cf.size - 2*cf.r_max
         square = patches.Rectangle((cf.r_max*scale, cf.r_max*scale), side*scale, side*scale, 
