@@ -8,6 +8,9 @@ def crop_to_square(img_array, size=None):
 
     if size is None:
         size = min(img_array.shape[:2])
+    elif size > min(img_array.shape[:2]):
+        raise ValueError(f"image {img_array.shape[:2]} "
+                         +f"is smaller than size = {size}")
 
     return img_array[:size, :size]
 

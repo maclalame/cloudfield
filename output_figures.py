@@ -22,6 +22,13 @@ cf_names = ['Nuages/20260527_typical.jpeg',
             'Nuages/20260527_typeL.jpeg',
             'Nuages/20220419_rue2nuages.jpeg']
 
+cf_names = ['Nuages/Intermediate.jpeg',
+            'Nuages/Holed1.jpeg',
+            'Nuages/Cluster1.jpeg']
+
+scale = 0.03
+size = 5000
+
 def corr_simple_cases(save=False):
 
     r_max=100
@@ -191,12 +198,12 @@ def corr_length(cf_name='Nuages/20260527_typical.jpeg', plot=False):
     return delta
 
 def corr_cloudfields(save=False):
-    r_max = 1250
+    r_max = 1000
     thresh = 150
     scale = 0.03 # km/px
     size=5000
     
-    fig, ax = plt.subplots(6, 4, figsize=(22,41))
+    fig, ax = plt.subplots(len(cf_names), 4, figsize=(22,41/6*len(cf_names)))
 
     norm=colors.TwoSlopeNorm(vmin=-1., vcenter=0., vmax=1.)
     img_norm = colors.TwoSlopeNorm(vmin=0, vcenter=0.5, vmax=1)
@@ -204,7 +211,7 @@ def corr_cloudfields(save=False):
     cf_list = []
     for cf_n in cf_names:
         img = image.image_to_binary_array(cf_n, thresh=thresh, size=size)[::-1,:]
-        cf = CloudField(img, r_max=r_max)
+        cf = CloudField(bool_img=img, r_max=r_max)
         cf_list.append(cf)
 
     for i, cf in enumerate(cf_list):
@@ -236,6 +243,10 @@ def corr_cloudfields(save=False):
             B = cste / (1-cste)
             return (np.exp(-r/delta) + B) / (1 + B)
 
+        def g(r, eta):
+            cste=(2*cf.box_cloud_cover-1)*(2*cf.cloud_cover - 1)
+            return 1 / r**eta + cste
+
         max_fit = 1
         mask = r < max_fit
         p0 = [1.5]
@@ -248,16 +259,16 @@ def corr_cloudfields(save=False):
                     extent=[-cf.r_max*scale,cf.r_max*scale,-cf.r_max*scale,cf.r_max*scale])
         ax[i,2].plot(r, C_r_mean, color='black', label=r'C(r)')
         ax[i,2].plot(r, f(r, *popt), '--', color='red', alpha=.7)
-        # ax[i,2].fill_between(np.arange(len(C_r_mean))*scale,
-        #                         C_r_mean+C_r_std/np.sqrt(N),
-        #                         C_r_mean-C_r_std/np.sqrt(N),
-        #                         color='black', alpha=0.4)
         ax[i,3].plot(np.arange(len(C_angle_mean)), 
                         C_angle_mean, color='black', label=r'$C(\theta)$')
-        # ax[i,3].fill_between(np.arange(len(C_angle_mean)),
-        #                 C_angle_mean+C_angle_std/np.sqrt(N),
-        #                 C_angle_mean-C_angle_std/np.sqrt(N),
-        #                 color='black', alpha=0.4)           
+
+        max_fit = 1
+        min_fit = .1
+        mask = np.logical_and(r < max_fit, r > min_fit)
+        p0 = [1]
+        popt, pcov = curve_fit(g, r[mask], C_r_mean[mask], p0)
+        eta = popt[0]
+                            
 
         side = cf.size - 2*cf.r_max
         square = patches.Rectangle((cf.r_max*scale, cf.r_max*scale), side*scale, side*scale, 
@@ -285,7 +296,7 @@ def corr_cloudfields(save=False):
                     backgroundcolor='white', fontsize=20)
         ax[i,0].text(0,0, f'c.c. = {cf.cloud_cover:.2f}', 
                         backgroundcolor='white', fontsize=20)
-        ax[i,2].text(20,.9, r'$\ell_c =$ ' + f'{delta:.2f} km',
+        ax[i,2].text(20,.9, r'$\ell_c =$ ' + f'{delta:.1f} km',
                      backgroundcolor='white', fontsize=20)
 
         if i==0:
@@ -480,6 +491,83 @@ def corr_threshold(save=False):
     if save:
         plt.savefig('output_figures/corr_threshold_subsampled_img.pdf', 
                 bbox_inches='tight')
+
+def corr_asym(save=False):
+
+    fig, ax = plt.subplots(nrows=len(cf_names),
+                           ncols=2,
+                           figsize=(6,len(cf_names)*3))
+
+    for i, cf_name in enumerate(cf_names):
+        img = image.image_to_binary_array(cf_name, thresh=150, size=size)
+        cf = CloudField(bool_img=img, r_max=1000)
+
+        M0, M1, M2 = cf.minkowski()
+        m0 = M0 / size**2
+        corr_sym = cf.C(n_draws=1000)[1]
+        corr_cloud = cf.C_cloud(n_draws=1000)[1]
+        corr_clear = cf.C_clear(n_draws=1000)[1]
+
+        ax[i,0].imshow(img, cmap='binary_r', origin='lower')
+        ax[i,0].set_title(f'm0={m0:.2f} | M2 = {M2:.0f}')
+
+        xaxis = np.arange(len(corr_sym))
+        cloud_asymptote = np.ones_like(xaxis)*cf.cloud_cover*cf.box_cloud_cover
+        clear_asymptote = np.ones_like(xaxis)*(1-cf.cloud_cover)*(1-cf.box_cloud_cover)
+        ax[i,1].plot(corr_sym, color='black', label='sym')
+        ax[i,1].plot(corr_cloud, color='lightblue', label="cloud")
+        ax[i,1].plot(xaxis, cloud_asymptote, '--', color='lightblue', alpha=.5)
+        ax[i,1].plot(corr_clear, color='darkblue', label="clear")
+        ax[i,1].plot(xaxis, clear_asymptote, '--', color='darkblue', alpha=.5)
+
+        ax[i,1].grid()
+        ax[i,0].set_ylabel(r'$x_y$ [px]')
+
+    ax[-1,0].set_xlabel(r'$x_x$ [px]')
+    ax[-1,1].set_xlabel(r'Radius $r$ [px]')
+    ax[0,1].legend()
+    ax[0,1].set_title(r'Radial correlation $C(r)$')
+
+    if save:
+        plt.savefig('output_figures/corr_asym.pdf', 
+                    bbox_inches='tight')
+
+
+def MF_3D():
+
+    ax = plt.figure().add_subplot(projection='3d')
+
+    m0, m1, m2 = [], [], []
+    thresh = 150
+    total_area = size**2*scale**2
+
+    for cf in cf_names:
+        img = image.image_to_binary_array(cf, thresh=thresh, size=size)
+        cf = CloudField(img)
+        _m0, _m1, _m2 = cf.minkowski()
+        print(f'{_m0*scale**2/total_area:.2f} | {_m1*scale/total_area:.2f} | {_m2/total_area:.2f}')
+        m0.append(_m0 * scale**2 / total_area)
+        m1.append(_m1 * scale / total_area)
+        m2.append(_m2 / total_area)
+
+    ax.scatter(m0, m1, m2)
+
+    # Make legend, set axes limits and labels
+    ax.legend()
+    # ax.set_xlim(0, 1)
+    # ax.set_ylim(0, 1)
+    # ax.set_zlim(0, 1)
+    ax.set_xlabel('m0')
+    ax.set_ylabel('m1')
+    ax.set_zlabel('m2')
+
+    # Customize the view angle so it's easier to see that the scatter points lie
+    # on the plane y=0
+    ax.view_init(elev=20., azim=-35, roll=0)
+
+
+
+    plt.show()
 
 def test_mantz2008():
     cf_names = ['Nuages/20260527_typical.jpeg',

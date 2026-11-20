@@ -181,14 +181,29 @@ class CloudField:
 
         return C_xy, C_r, C_angle
     
-    def C_asym(self, n_draws=100000):
+    def C_cloud(self, n_draws=100000):
 
         """
         Exact same function as C, but cloudy cell is +1 and clear sky
         cell is 0 instead of +1 and -1.
         """
 
-        C_xy = self._numba_impl.compute_C_asym(n_draws)
+        C_xy = self._numba_impl.compute_C_asym(n_draws, "cloud")
+        center = (self.r_max, self.r_max)
+        C_polar = warp_polar(C_xy, radius=self.r_max, center=center)
+        C_r = np.mean(C_polar, axis=0)
+        C_angle = np.mean(C_polar, axis=1)
+
+        return C_xy, C_r, C_angle
+
+    def C_clear(self, n_draws=100000):
+
+        """
+        Exact same function as C, but clear sky cell is +1 and cloudy
+        cell is 0 instead of -1 and +1.
+        """
+
+        C_xy = self._numba_impl.compute_C_asym(n_draws, "clear")
         center = (self.r_max, self.r_max)
         C_polar = warp_polar(C_xy, radius=self.r_max, center=center)
         C_r = np.mean(C_polar, axis=0)
@@ -298,6 +313,9 @@ class _CloudFieldNumba:
         x0, y0, side = r_max, r_max, self.size - 2*r_max
         self.box_boundaries = (x0, y0, side)
         self.box_img = bool_img[x0:x0+side, y0:y0+side].copy()
+        if side <= 0:
+            raise ValueError("r_max should be smaller than size / 2 \n"
+                             + f"r_max = {self.r_max} | size = {self.size}")
         self.box_cloud_cover = np.sum(self.box_img) / side**2
          
     def random_draw(self, n_draws, boundaries):
@@ -444,29 +462,39 @@ class _CloudFieldNumba:
     
         return C
     
-    def compute_C_asym(self, n_draws):
+    def compute_C_asym(self, n_draws, interest):
 
         """
         Exact same function as C, but cloudy cell is +1 and clear sky
-        cell is 0 instead of +1 and -1.
+        cell is 0 instead of +1 and -1, is interest="cloud"
 
         Parameters:
         n_draws : int 
             Number of pixels (i,j) that we choose randomly.
+        interest : str
+            Phase of interest is +1.
+            "cloud" or "clear"
 
         Returns:
         C : float array
             Spin-spin asymetric correlation map.
         """
+        
+        if interest == "cloud":
+            bool_img = self.bool_img.copy()
+        elif interest == "clear":
+            bool_img = ~self.bool_img.copy()
+        else:
+            raise ValueError('interest must be "cloud" or "clear"')
 
         corr_img = np.zeros((2*self.r_max, 2*self.r_max))
         n_img = 0
 
         boundaries_ij = (self.r_max, self.r_max, self.size-2*self.r_max)
         for (i,j) in self.random_draw(n_draws, boundaries_ij):
-            neighborhood = self.bool_img[i-self.r_max:i+self.r_max+1,
+            neighborhood = bool_img[i-self.r_max:i+self.r_max+1,
                                     j-self.r_max:j+self.r_max+1]
-            if self.bool_img[i, j]:
+            if bool_img[i, j]:
                 corr_img += neighborhood
             n_img += 1
 
@@ -680,12 +708,14 @@ class _Mantz2008:
 
     
 if False:
-    img_path = 'Nuages/trous_OI_60m.png'
+    img_path = 'Nuages/Holed1.jpeg'
     # bool_img = image.image_to_binary_array(img_path, thresh=150, size=5000)
-    gray_img = image.image_to_float_array(img_path, size=5000)
-    cf = CloudField(bool_img=bool_img, gray_img=gray_img, thresh=150)
-    scale = 60e-3 #km/px
+    gray_img = image.image_to_float_array(img_path)
+    cf = CloudField(gray_img=gray_img, thresh=150, r_max=1000)
+    scale = 30e-3 #km/px
     area = cf.size**2 * scale**2
+
+    print(cf.size)
 
     # Minkowski functionals, in pixels 
     M0, M1, M2 = cf.minkowski()
@@ -695,6 +725,7 @@ if False:
     m1 = M1 * scale / area
     m2 = M2 / area
     print((m0, m1, m2))
+    print((M0,M1,M2))
 
     M0, M1, M2 = cf.mantz2008()
 
@@ -703,6 +734,7 @@ if False:
     m1 = M1 * scale / area
     m2 = M2 / area
     print((m0, m1, m2))
+    print((M0,M1,M2))
 
 
 
